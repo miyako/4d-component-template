@@ -2,6 +2,12 @@ name: Release compiled component
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version_tag:
+        description: Existing matching version tag (v<SemVer>); never creates a tag
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -9,33 +15,57 @@ permissions:
 jobs:
   gate:
     runs-on: ubuntu-24.04
+    outputs:
+      source_sha: ${{ steps.release_ref.outputs.sha }}
+      release_tag: ${{ steps.release_ref.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Resolve existing version tag to an immutable commit
+        id: release_ref
+        env:
+          VERSION_TAG: ${{ inputs.version_tag }}
+        run: >-
+          python scripts/release_ref.py resolve
+          --event "$GITHUB_EVENT_NAME" --ref-type "$GITHUB_REF_TYPE"
+          --ref-name "$GITHUB_REF_NAME" --version-tag "$VERSION_TAG"
+          --event-sha "$GITHUB_SHA"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.release_ref.outputs.sha }}
       - name: Require initialized matching repository, version tag and explicit 4D opt-in
         env:
           FOURD_ENABLED: ${{ vars.FOURD_ENABLED }}
-        run: python scripts/ci_config.py validate --release
+          RELEASE_TAG: ${{ steps.release_ref.outputs.tag }}
+        run: python scripts/ci_config.py validate --release --tag "$RELEASE_TAG"
 
   native:
     needs: gate
     uses: ./.github/workflows/ci.yml
+    with:
+      source_sha: ${{ needs.gate.outputs.source_sha }}
+      release_call: true
 
   compile:
-    needs: native
+    needs: [gate, native]
     runs-on: macos-15
     env:
       FOURD_ENABLED: ${{ vars.FOURD_ENABLED }}
       TOOL4D_URL: ${{ vars.TOOL4D_URL }}
       TOOL4D_SHA256: ${{ vars.TOOL4D_SHA256 }}
+      RELEASE_TAG: ${{ needs.gate.outputs.release_tag }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.gate.outputs.source_sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: python scripts/ci_config.py validate --release
+      - run: python scripts/ci_config.py validate --release --tag "$RELEASE_TAG"
       - uses: actions/download-artifact@v4
         with:
           name: component-resources
@@ -61,7 +91,7 @@ jobs:
       - name: Compile both 4D targets (no source-only fallback)
         run: python scripts/compile_component.py --tool4d .tools/tool4d.app/Contents/MacOS/tool4d
       - name: Package unsigned compiled dependency-manager component
-        run: python scripts/package_component.py --unpack-test
+        run: python scripts/package_component.py --tag "$RELEASE_TAG" --unpack-test
       - name: Require real host tests against the actual compiled release component
         shell: python
         run: |
@@ -81,11 +111,17 @@ jobs:
           retention-days: 7
 
   publish:
-    needs: compile
+    needs: [gate, compile]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.gate.outputs.source_sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
       - uses: actions/download-artifact@v4
         with:
           name: compiled-release
@@ -94,6 +130,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ needs.gate.outputs.release_tag }}
+          RELEASE_SHA: ${{ needs.gate.outputs.source_sha }}
         run: |
+          git fetch --force --no-tags origin "+refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
+          python scripts/release_ref.py verify --tag "$RELEASE_TAG" --expected-sha "$RELEASE_SHA"
           gh release create "$RELEASE_TAG" dist/*.zip --verify-tag --title "$RELEASE_TAG" --notes "Unsigned compiled component with universal macOS and x64 Windows CLI resources. Interpreted class and method sources are excluded. This artifact is not signed or notarized. Built with the free tool4D compiler from an explicitly SHA-256-pinned download."

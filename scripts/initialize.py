@@ -9,6 +9,31 @@ import tempfile
 import uuid
 import xml.etree.ElementTree as ET
 import os
+import subprocess
+import urllib.parse
+
+
+def github_repository(root):
+    """Return only owner/name, never log credential-bearing remote URLs."""
+    root = Path(root).resolve()
+    top = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=root,
+                         capture_output=True, text=True, check=False)
+    if top.returncode or Path(top.stdout.strip()).resolve() != root:
+        return None
+    remote = subprocess.run(["git", "remote", "get-url", "origin"], cwd=root,
+                            capture_output=True, text=True, check=False)
+    if remote.returncode:
+        return None
+    url = remote.stdout.strip()
+    if url.startswith("git@github.com:"):
+        path = url.removeprefix("git@github.com:")
+    else:
+        parsed = urllib.parse.urlsplit(url)
+        if parsed.hostname != "github.com":
+            return None
+        path = parsed.path.lstrip("/")
+    path = path.removesuffix(".git")
+    return path if re.fullmatch(r"[^/\s]+/[^/\s]+", path) else None
 
 
 def validate(repository, namespace, cli, language, feature):
@@ -56,6 +81,14 @@ def initialize(root, repository, namespace, cli, language, feature):
         raise ValueError("selected CLI starter is missing")
     if any(path.is_symlink() for directory in (source, starter) for path in [directory, *directory.rglob("*")]):
         raise ValueError("template component/starter must not contain symlinks")
+    if any(parent.is_symlink() for directory in (source, starter) for parent in directory.parents):
+        raise ValueError("initialization source directories must not traverse symlinks")
+    for relative in ("template.json", "package.json", "README.md",
+                     "tests/host/Project/Sources/Methods/Smoke.4dm",
+                     "tests/host/Project/Sources/dependencies.json", "tests/host/environment4d.json"):
+        path = root / relative
+        if any(parent.is_symlink() for parent in [path, *path.parents]):
+            raise ValueError("initialization paths must not traverse symlinks: " + relative)
     replacements = {
         old["repository"]: repository,
         old["namespace"]: namespace,
@@ -69,6 +102,9 @@ def initialize(root, repository, namespace, cli, language, feature):
         shutil.copytree(source, staged_component)
         staged_cli = stage / "cli"
         shutil.copytree(starter, staged_cli)
+        notices = staged_cli / "licenses"
+        if notices.is_dir():
+            shutil.copytree(notices, staged_component / "Resources/licenses", dirs_exist_ok=True)
         for directory in (staged_component, staged_cli):
             for path in sorted(directory.rglob("*")):
                 if path.is_file() and path.suffix not in {".png", ".jpg", ".ico"}:
@@ -93,7 +129,14 @@ def initialize(root, repository, namespace, cli, language, feature):
                          "tests/host/Project/Sources/dependencies.json", "tests/host/environment4d.json"):
             path = root / relative
             if path.is_file():
-                rewritten[path] = pattern.sub(lambda match: replacements[match.group()], path.read_text(encoding="utf-8"))
+                text = path.read_text(encoding="utf-8")
+                if relative == "README.md":
+                    chunks = re.split(r"(https://github\.com/[^\s)>\]]+)", text)
+                    rewritten[path] = "".join(chunk if index % 2 else
+                        pattern.sub(lambda match: replacements[match.group()], chunk)
+                        for index, chunk in enumerate(chunks))
+                else:
+                    rewritten[path] = pattern.sub(lambda match: replacements[match.group()], text)
         staged_component.rename(target)
         staged_cli.rename(root / "cli")
         for path, text in rewritten.items():
@@ -116,6 +159,8 @@ def main():
     args = parser.parse_args()
     try:
         actual = os.environ.get("GITHUB_REPOSITORY")
+        if not actual:
+            actual = github_repository(args.root)
         if actual and actual.rsplit("/", 1)[-1] != args.repository:
             raise ValueError("--repository must equal the actual GITHUB_REPOSITORY basename")
         changed = initialize(args.root, args.repository, args.namespace, args.cli, args.language, args.feature)

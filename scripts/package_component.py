@@ -17,10 +17,11 @@ import struct
 import zipfile
 
 from ci_config import ROOT, load_config
-from compile_component import input_digest
+from compile_component import input_digest, output_digest
 
 
 COMPILE_TARGETS = {"x86_64_generic", "arm64_macOS_lib"}
+RUNTIME_NOTICES = {"go": "Go-LICENSE.txt", "rust": "Rust-LICENSE-MIT.txt"}
 EXCLUDED = {"data", "logs", ".git", ".ds_store", "__macosx"}
 
 
@@ -111,6 +112,8 @@ def validate_compile(root, component, repository):
                if re.fullmatch(r"MX64 [0-9]+", path.name) and path.is_file()]
     if not objects or any(path.is_symlink() or path.stat().st_size == 0 for path in objects):
         raise ValueError("CompiledCode must contain nonempty regular MX64 numeric-id files")
+    if status.get("output_sha256") != output_digest(component):
+        raise ValueError("compile marker output_sha256 does not match compiled artifacts; recompile")
 
 
 def include_project(relative):
@@ -141,6 +144,10 @@ def package(root=ROOT, *, repository=None, tag=None, language=None):
     if component.is_symlink() or component.parent.is_symlink():
         raise ValueError("component directories must not be symlinks")
     validate_resources(component, config["cli"])
+    if config["language"] in RUNTIME_NOTICES:
+        notice = component / "Resources/licenses" / RUNTIME_NOTICES[config["language"]]
+        if not notice.is_file() or notice.is_symlink() or not notice.read_bytes().strip():
+            raise ValueError("selected runtime redistribution notice is missing: " + str(notice))
     validate_compile(root, component, config["repository"])
     license_path = root / "LICENSE"
     if not license_path.is_file() or license_path.is_symlink():
@@ -148,6 +155,8 @@ def package(root=ROOT, *, repository=None, tag=None, language=None):
     files = []
     for path in sorted(component.rglob("*")):
         relative = path.relative_to(component)
+        if any(part.lower() in {".tools", "tool4d.app"} for part in relative.parts):
+            raise ValueError("vendor tooling/local installation must not be included in component packages")
         if any(part.lower() in EXCLUDED for part in relative.parts):
             continue
         if ("deriveddata" in (part.lower() for part in relative.parts)
@@ -173,6 +182,8 @@ def package(root=ROOT, *, repository=None, tag=None, language=None):
     write_zip(packed, project_entries)
     prefix = config["repository"] + ".4dbase/"
     destination = root / "dist" / (config["repository"] + ".zip")
+    if any(path.is_symlink() for path in [destination, *destination.parents]):
+        raise ValueError("package destination must not traverse symlinks")
     destination.parent.mkdir(parents=True, exist_ok=True)
     entries = [(prefix + config["repository"] + ".4DZ", packed.getvalue(), 0o644)]
     for name, path in files:

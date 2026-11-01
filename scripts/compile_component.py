@@ -19,13 +19,27 @@ def input_digest(root):
         directory = component / folder
         if directory.exists():
             files.extend(p for p in directory.rglob("*") if p.is_file()
-                         and not (folder == "Resources" and p.relative_to(directory).parts[0] == "en.lproj"))
+                         and not (folder == "Resources" and p.relative_to(directory).as_posix() == "en.lproj/syntaxEN.json"))
     digest = hashlib.sha256()
     for path in sorted(files):
-        if path.is_symlink():
+        if any(parent.is_symlink() for parent in [path, *path.parents]):
             raise ValueError("component inputs must not be symlinks: " + str(path))
         digest.update(path.relative_to(root).as_posix().encode("utf-8") + b"\0")
         digest.update(path.read_bytes() + b"\0")
+    return digest.hexdigest()
+
+
+def output_digest(component):
+    component = Path(component)
+    files = sorted((component / "Project/DerivedData").rglob("*"))
+    files += sorted((component / "Libraries").rglob("*"))
+    digest = hashlib.sha256()
+    for path in files:
+        if any(parent.is_symlink() for parent in [path, *path.parents]):
+            raise ValueError("compiled outputs must not traverse symlinks")
+        if path.is_file():
+            digest.update(path.relative_to(component).as_posix().encode("utf-8") + b"\0")
+            digest.update(path.read_bytes() + b"\0")
     return digest.hexdigest()
 
 
@@ -37,14 +51,21 @@ def compile_component(root, tool4d):
     name = config["repository"]
     project = root / "component" / name / "Project" / (name + ".4DProject")
     output = root / "build" / "compile-status.json"
+    if any(path.is_symlink() for path in [output, *output.parents]):
+        raise ValueError("compiler status path must not traverse symlinks")
     output.parent.mkdir(exist_ok=True)
     output.unlink(missing_ok=True)
     request = output.parent / "compile-request.json"
     request.write_text(json.dumps({"project": str(project), "status": str(output)}) + "\n")
     derived = project.parent / "DerivedData"
+    if any(path.is_symlink() for path in [derived, *derived.parents]):
+        raise ValueError("compiler cleanup path must not traverse symlinks")
     if derived.exists():
         shutil.rmtree(derived)
-    (project.parent.parent / "Libraries" / "lib4d-arm64.dylib").unlink(missing_ok=True)
+    library = project.parent.parent / "Libraries" / "lib4d-arm64.dylib"
+    if any(path.is_symlink() for path in [library, *library.parents]):
+        raise ValueError("compiler library cleanup path must not traverse symlinks")
+    library.unlink(missing_ok=True)
     original_digest = input_digest(root)
     subprocess.run([str(Path(tool4d).resolve()),
                     str(root / "tooling" / "compiler" / "Project" / "compiler.4DProject"),
@@ -61,6 +82,7 @@ def compile_component(root, tool4d):
     if input_digest(root) != original_digest:
         raise ValueError("component inputs changed during compilation; refusing stale output")
     status["input_sha256"] = original_digest
+    status["output_sha256"] = output_digest(project.parent.parent)
     output.write_text(json.dumps(status, indent=2) + "\n")
     return status
 

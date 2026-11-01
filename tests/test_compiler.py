@@ -24,6 +24,7 @@ class CompilerTests(unittest.TestCase):
         for name in ("package.json", "LICENSE"):
             shutil.copy2(ROOT / name, self.root / name)
         self.name = config["repository"]
+        self.feature_class = config.get("feature_class", "Greeting")
         shutil.copytree(ROOT / "component" / self.name, self.root / "component" / self.name)
         self.project = self.root / "component" / self.name / "Project" / (self.name + ".4DProject")
         self.status = self.root / "build/compile-status.json"
@@ -57,14 +58,14 @@ class CompilerTests(unittest.TestCase):
         with patch.object(compiler.subprocess, "run", side_effect=self.result):
             status = compiler.compile_component(self.root, "/fake/tool4d")
         self.assertEqual(status["input_sha256"], compiler.input_digest(self.root))
-        path = self.project.parent / "Sources/Classes/Greeting.4dm"
+        path = self.project.parent / "Sources/Classes" / (self.feature_class + ".4dm")
         path.write_text(path.read_text() + "\n")
         self.assertNotEqual(status["input_sha256"], compiler.input_digest(self.root))
 
     def test_changed_sources_during_compile_rejected(self):
         def changed(*args, **kwargs):
             self.result(*args, **kwargs)
-            path = self.project.parent / "Sources/Classes/Greeting.4dm"
+            path = self.project.parent / "Sources/Classes" / (self.feature_class + ".4dm")
             path.write_text(path.read_text() + "\n")
         with patch.object(compiler.subprocess, "run", side_effect=changed):
             with self.assertRaisesRegex(ValueError, "changed during compilation"):
@@ -76,3 +77,14 @@ class CompilerTests(unittest.TestCase):
         with patch.object(compiler.subprocess, "run", side_effect=wrong):
             with self.assertRaisesRegex(ValueError, "required project and targets"):
                 compiler.compile_component(self.root, "/fake/tool4d")
+
+    @unittest.skipUnless(__import__("os").name == "posix", "symlink requires POSIX")
+    def test_cleanup_does_not_follow_derived_data_symlink(self):
+        outside = self.root / "sentinel-directory"
+        outside.mkdir()
+        sentinel = outside / "keep"
+        sentinel.write_text("not compiler output")
+        (self.project.parent / "DerivedData").symlink_to(outside)
+        with self.assertRaisesRegex(ValueError, "symlinks"):
+            compiler.compile_component(self.root, "/fake/tool4d")
+        self.assertEqual(sentinel.read_text(), "not compiler output")

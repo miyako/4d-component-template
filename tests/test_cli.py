@@ -79,6 +79,9 @@ class ContractTests:
         execution_directory.mkdir()
         cls.executable = execution_directory / executable_name
         if cls.language == "go":
+            environment.pop("GOOS", None)
+            environment.pop("GOARCH", None)
+            environment["CGO_ENABLED"] = "0"
             environment.update(
                 GOCACHE=str(root / "go-cache"),
                 GOPATH=str(root / "go-path"),
@@ -88,6 +91,7 @@ class ContractTests:
             )
             commands = [["go", "build", "-o", str(cls.executable), "."]]
         elif cls.language == "rust":
+            environment.pop("CARGO_BUILD_TARGET", None)
             environment["CARGO_TARGET_DIR"] = str(root / "target")
             built_executable = root / "target" / "release" / executable_name
             commands = [["cargo", "build", "--release", "--offline", "--locked"]]
