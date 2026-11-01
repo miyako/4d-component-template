@@ -4,6 +4,9 @@
 is the generic synchronous process adapter. Arguments must be Text, File or
 Folder. File/Folder values are expanded to physical POSIX paths on macOS or
 platform paths on Windows; NUL is rejected using exact string comparison.
+Numeric, Boolean, Null, date/time and Collection values are rejected before
+object-instance checks; plain Objects are also rejected. They return
+`invalid_argument`, rather than raising a 4D object-type error or launching a process.
 
 `quote(argument : Text) : Text` always quotes one argument. macOS double quotes
 escape backslashes and quotes; Windows follows the CRT backslash-before-quote

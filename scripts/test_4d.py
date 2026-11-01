@@ -35,6 +35,12 @@ def test_4d(root, tool4d, component=None):
     status = json.loads(output.read_text())
     if status.get("success") is not True or len(status.get("cases", [])) != 6:
         raise ValueError("4D host contract failed: " + json.dumps(status, ensure_ascii=False))
+    rejections = status.get("rejectedArguments")
+    expected = {"ok": False, "error": {
+        "code": "invalid_argument", "message": "Arguments must be Text, File or Folder"}}
+    if not isinstance(rejections, list) or len(rejections) != 9 or any(
+            entry.get("result") != expected for entry in rejections):
+        raise ValueError("4D host did not reject all unsupported argument types before process launch")
     if component is not None and status.get("compiled") is not True:
         raise ValueError("release component was not running compiled code")
     return status
