@@ -1,11 +1,18 @@
-Read and follow `AGENTS.md` and `README.md` before editing this repository.
-If `template.json.initialized` is false, initialize the exact destination
-repository name, user-selected Go/Rust/C++ language, unique namespace, CLI name
-and feature using `scripts/initialize.py` before implementing the feature.
-Do not ship all three source implementations or publish the unconfigured template.
-Preserve 4D repository/component/project/catalog/package/release-name equality.
-Keep the generic execution layer separate from feature classes and update class
-documentation and real host tests with every API change.
-Use actual 4D APIs and tool4d; do not invent setup actions, architecture properties,
-argv-array SystemWorker overloads or success fallbacks. Follow the validation,
-licensing, signing and compiled-package acceptance requirements in `AGENTS.md`.
+Read `AGENTS.md` (canonical THINK/ASK → RUN playbook), `README.md`,
+`template.json`, class documentation and relevant scripts/tests before editing.
+For component adoption, also read `.github/skills/4d-cli-component/SKILL.md` if
+the client did not load it; its presence does not prove invocation.
+Never initialize the original `miyako/4d-component-template` repository.
+In an uninitialized destination, use `scripts/initialize.py` with the exact
+case-sensitive GitHub basename, user-selected Go/Rust/C++ language, independent
+unique namespace, CLI basename and feature description. Initialization and
+`rename_feature.py` do not implement the feature: replace its API/CLI/docs/tests.
+Keep repository/component/project/catalog/package/release names equal; retain
+only the selected language and keep generic execution separate from feature code.
+Use real 4D APIs, scalar argument guards and strict NUL Position comparison;
+never invent SystemWorker argv overloads, setup actions or success fallbacks.
+Require same-revision binaries, actual source host tests, real compilation and
+host tests against the unpacked source-stripped compiled ZIP. Report `not_run`
+separately from `passed`; partial local acceptance is NOT release ready.
+Follow AGENTS.md for fixed free tool4d, licensing, packaging and optional signing.
+Unsigned local acceptance needs no license activation or signing secrets.

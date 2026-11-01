@@ -4,12 +4,14 @@ import argparse
 import hashlib
 import json
 import os
+import platform
 from pathlib import Path, PurePosixPath
 import re
 import shutil
 import stat
 import subprocess
 import tarfile
+import tempfile
 import urllib.parse
 import urllib.request
 import zipfile
@@ -55,6 +57,11 @@ def load_config(root=ROOT, *, initialized=False, repository=None, tag=None):
             raise ValueError("4D project namespace must match template.json")
         if catalog.getroot().attrib.get("name") != config["repository"]:
             raise ValueError("4D catalog name must match template.json repository")
+        feature_class = config.get("feature_class", "Greeting")
+        if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,30}", feature_class):
+            raise ValueError("feature_class must be a non-underscore 4D identifier")
+        if not (project / "Sources" / "Classes" / (feature_class + ".4dm")).is_file():
+            raise ValueError("configured feature class is missing")
     elif config.get("language") is not None:
         raise ValueError("uninitialized template must not select a language")
     if initialized and not config["initialized"]:
@@ -80,15 +87,20 @@ def matrix(config):
 
 
 def assemble(root=ROOT):
+    from build_provenance import verify
     root = Path(root)
     config = load_config(root, initialized=True, repository=os.environ.get("GITHUB_REPOSITORY"))
     destination = root / "component" / config["repository"] / "Resources" / "bin"
+    if any(path.is_symlink() for path in [destination, *destination.parents]):
+        raise ValueError("resource assembly destination must not traverse symlinks")
     mac = destination / "macOS" / config["cli"]
     windows = destination / "Windows" / (config["cli"] + ".exe")
     inputs = [root / "build" / target / (config["cli"] + (".exe" if target == "windows-x64" else ""))
               for target in TARGETS]
     if not all(path.is_file() and not path.is_symlink() for path in inputs):
         raise ValueError("all three native build artifacts are required")
+    for target, path in zip(TARGETS, inputs):
+        verify(root, target, path)
     mac.parent.mkdir(parents=True, exist_ok=True)
     windows.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(["lipo", "-create", str(inputs[0]), str(inputs[1]), "-output", str(mac)], check=True)
@@ -151,55 +163,119 @@ def extract_tar(archive, tools):
             raise
 
 
-def download_tool4d(root=ROOT):
-    """Download a concrete, SHA-256-pinned HTTPS TAR.XZ or ZIP app archive."""
-    root = Path(root)
-    url = os.environ.get("TOOL4D_URL", "")
-    digest = os.environ.get("TOOL4D_SHA256", "")
-    if urllib.parse.urlsplit(url).scheme != "https" or not re.fullmatch(r"[0-9a-fA-F]{64}", digest):
-        raise ValueError("TOOL4D_URL (HTTPS) and TOOL4D_SHA256 (64 hex digits) are required")
+def require_tool4d_host():
+    if platform.system() != "Darwin" or platform.machine().lower() not in {"arm64", "aarch64"}:
+        raise ValueError("pinned tool4d is macOS ARM64 only; use a matching Apple Silicon host")
+
+
+def tool_pin(root=ROOT):
+    """Derive the official URL from versioned public metadata, not mutable latest."""
+    manifest = json.loads((Path(root) / "package.json").read_text(encoding="utf-8"))
+    tool = manifest.get("tool")
+    if not isinstance(tool, dict):
+        raise ValueError("package.json.tool must specify the approved compiler build and SHA256")
+    if (tool.get("platform") != "macos" or tool.get("arch") != "arm"
+            or not isinstance(tool.get("branch"), str) or not re.fullmatch(r"[0-9]+\.x", tool["branch"])
+            or not isinstance(tool.get("version"), str) or not re.fullmatch(r"[0-9]+\.[0-9]+", tool["version"])
+            or not isinstance(tool.get("build"), str) or not re.fullmatch(r"[1-9][0-9]*", tool["build"])
+            or not isinstance(tool.get("sha256"), str) or not re.fullmatch(r"[0-9a-fA-F]{64}", tool["sha256"])):
+        raise ValueError("package.json.tool requires fixed numeric build, macos/arm and a 64-hex SHA256")
+    url = (f"https://resources-download.4d.com/release/{tool['branch']}/"
+           f"{tool['version']}/{tool['build']}/mac/tool4d_arm64.tar.xz")
+    return url, tool["sha256"].lower()
+
+
+def resolve_tool_pin(root=ROOT, *, url=None, digest=None):
+    if url is not None or digest is not None:
+        if not url or not digest:
+            raise ValueError("--url and --sha256 must be supplied together and nonempty")
+        return checked_tool_pin(url, digest)
+    env_url = os.environ.get("TOOL4D_URL", "")
+    env_digest = os.environ.get("TOOL4D_SHA256", "")
+    if env_url or env_digest:
+        if not env_url or not env_digest:
+            raise ValueError("TOOL4D_URL and TOOL4D_SHA256 overrides must be supplied together")
+        return checked_tool_pin(env_url, env_digest)
+    return checked_tool_pin(*tool_pin(root))
+
+
+def checked_tool_pin(url, digest):
+    parsed = urllib.parse.urlsplit(url)
+    if (parsed.scheme != "https" or parsed.hostname != "resources-download.4d.com"
+            or parsed.username or parsed.password or parsed.query or parsed.fragment
+            or not re.fullmatch(r"[0-9a-fA-F]{64}", digest)):
+        raise ValueError("official HTTPS tool4d URL and 64-hex SHA256 are required")
     if any(part.lower() == "latest" for part in
-           PurePosixPath(urllib.parse.unquote(urllib.parse.urlsplit(url).path)).parts):
-        raise ValueError("TOOL4D_URL must pin a concrete build, not latest")
+           PurePosixPath(urllib.parse.unquote(parsed.path)).parts):
+        raise ValueError("tool4d URL must pin a concrete build, not latest")
+    return url, digest.lower()
+
+
+def download_tool4d(root=ROOT, *, url=None, digest=None):
+    """Download a concrete, SHA-256-pinned HTTPS TAR.XZ or ZIP app archive."""
+    root = Path(root).resolve()
+    url, digest = resolve_tool_pin(root, url=url, digest=digest)
     tools = root / ".tools"
-    if tools.is_symlink():
+    if any(path.is_symlink() for path in [tools, *tools.parents]):
         raise ValueError(".tools must not be a symlink")
     tools.mkdir(exist_ok=True)
     archive = tools / "tool4d.download"
     if archive.is_symlink():
         raise ValueError("tool4D download destination must not be a symlink")
     sha = hashlib.sha256()
-    with urllib.request.urlopen(url, timeout=120) as response, archive.open("wb") as output:
-        if urllib.parse.urlsplit(response.geturl()).scheme != "https":
-            raise ValueError("tool4D download redirected outside HTTPS")
-        while chunk := response.read(1024 * 1024):
-            sha.update(chunk)
-            output.write(chunk)
+    try:
+        with urllib.request.urlopen(url, timeout=120) as response, archive.open("wb") as output:
+            redirected = urllib.parse.urlsplit(response.geturl())
+            if redirected.scheme != "https" or redirected.hostname != "resources-download.4d.com":
+                raise ValueError("tool4D download redirected outside official HTTPS origin")
+            while chunk := response.read(1024 * 1024):
+                sha.update(chunk)
+                output.write(chunk)
+    except (OSError, ValueError):
+        archive.unlink(missing_ok=True)
+        raise
     if sha.hexdigest().lower() != digest.lower():
         archive.unlink()
         raise ValueError("tool4D SHA-256 mismatch")
-    if not zipfile.is_zipfile(archive):
-        extract_tar(archive, tools)
-    else:
-        extract_zip(archive, tools)
-    executable = tools / "tool4d.app" / "Contents" / "MacOS" / "tool4d"
-    if not executable.is_file() or executable.is_symlink():
-        raise ValueError("archive must contain tool4d.app/Contents/MacOS/tool4d")
-    executable.chmod(0o755)
-    archive.unlink()
-    return executable
+    try:
+        with tempfile.TemporaryDirectory(prefix="tool4d-stage-", dir=tools) as temporary:
+            stage = Path(temporary)
+            if not zipfile.is_zipfile(archive):
+                extract_tar(archive, stage)
+            else:
+                extract_zip(archive, stage)
+            app = stage / "tool4d.app"
+            executable = app / "Contents" / "MacOS" / "tool4d"
+            if not executable.is_file() or executable.is_symlink():
+                raise ValueError("archive must contain tool4d.app/Contents/MacOS/tool4d")
+            executable.chmod(0o755)
+            installed = tools / "tool4d.app"
+            if installed.is_symlink():
+                raise ValueError("installed tool4d.app must not be a symlink")
+            if installed.exists():
+                raise ValueError("tool4d.app already exists; inspect/remove only that app before reinstalling")
+            app.rename(installed)
+        (tools / "tool4d-install.json").write_text(json.dumps({
+            "url": url, "sha256": sha.hexdigest(), "host": "macOS-arm64",
+        }, indent=2) + "\n", encoding="utf-8")
+    finally:
+        archive.unlink(missing_ok=True)
+    return installed / "Contents" / "MacOS" / "tool4d"
 
 
 def extract_zip(archive, tools):
     with zipfile.ZipFile(archive) as zipped:
         members = zipped.infolist()
+        names = set()
         for member in members:
             path = PurePosixPath(member.filename)
             mode = member.external_attr >> 16
             if (not member.filename or "\\" in member.filename or path.is_absolute()
                     or ".." in path.parts or ":" in member.filename
-                    or stat.S_IFMT(mode) not in (0, stat.S_IFREG, stat.S_IFDIR)):
+                    or stat.S_IFMT(mode) not in (0, stat.S_IFREG, stat.S_IFDIR)
+                    or path.as_posix() in names):
                 raise ValueError("unsafe path or non-regular file in tool4D archive")
+            names.add(path.as_posix())
             destination = tools.joinpath(*path.parts)
             if not destination.resolve().is_relative_to(tools.resolve()):
                 raise ValueError("tool4D archive would escape .tools")
@@ -219,17 +295,21 @@ def main():
     parser.add_argument("command", choices=("matrix", "validate", "assemble", "download-tool4d"))
     parser.add_argument("--root", type=Path, default=ROOT)
     parser.add_argument("--release", action="store_true")
+    parser.add_argument("--tag", help="explicit normalized release tag (manual dispatch); defaults to GITHUB_REF_NAME")
+    parser.add_argument("--url", help="optional official URL override, paired with --sha256")
+    parser.add_argument("--sha256", help="optional approved hash override; otherwise env pair/package.json.tool")
     args = parser.parse_args()
     try:
         if args.command == "download-tool4d":
-            print(download_tool4d(args.root))
+            require_tool4d_host()
+            print(download_tool4d(args.root, url=args.url, digest=args.sha256))
             return
         if args.release and not os.environ.get("GITHUB_REPOSITORY"):
             raise ValueError("GITHUB_REPOSITORY is required for release validation")
         config = load_config(
             args.root, initialized=args.release or args.command == "assemble",
             repository=os.environ.get("GITHUB_REPOSITORY"),
-            tag=os.environ.get("GITHUB_REF_NAME", "") if args.release else None)
+            tag=(args.tag if args.tag is not None else os.environ.get("GITHUB_REF_NAME", "")) if args.release else None)
         if args.release and os.environ.get("FOURD_ENABLED") != "true":
             raise ValueError("releases require FOURD_ENABLED=true")
         if args.command == "matrix":

@@ -25,6 +25,9 @@ retain stdout/stderr/exitCode when available; prelaunch failures have no exitCod
 Codes: `missing_executable`, `unsupported_platform`, `unsupported_architecture`,
 `invalid_argument`, `launch_failed`, `process_error`, `process_terminated`,
 `cli_error`, `invalid_protocol`. Invalid JSON/required field/version is not success.
+The protocol version must be numeric before comparison with version 1; Boolean
+and Null versions are rejected without a 4D type-comparison error. Top-level
+Boolean, Null, numeric and Collection payloads are rejected before field access.
 Unexpected system errors are captured narrowly with diagnostic details.
 
 ```4d

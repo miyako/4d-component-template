@@ -20,7 +20,8 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import build_cli
 import ci_config
 import package_component
-from compile_component import input_digest
+from compile_component import input_digest, output_digest
+from build_provenance import record
 
 
 def synthetic_universal():
@@ -65,6 +66,9 @@ class DeliveryTests(unittest.TestCase):
             (sources / directory).mkdir()
             (sources / directory / "excluded.4dm").write_text("// excluded\n", encoding="utf-8")
             (sources / directory / "metadata.json").write_text("{}", encoding="utf-8")
+        (sources / "Classes/Greeting.4dm").write_text("// synthetic feature class\n")
+        (self.root / "cli").mkdir()
+        (self.root / "cli/main.go").write_text("// synthetic CLI source\n")
         for name in ("settings.4DSettings", "catalog.4DCatalog", "dependencies.json", "folders.json"):
             (sources / name).write_text("{}", encoding="utf-8")
         (sources / "settings.4DSettings").write_text('<preferences><com.4d><general component_classStore_name="Example"/></com.4d></preferences>')
@@ -90,6 +94,11 @@ class DeliveryTests(unittest.TestCase):
             path.parent.mkdir(parents=True)
             path.write_bytes(content)
         resources = self.component / "Resources"
+        (resources / "licenses").mkdir()
+        for language, name in package_component.RUNTIME_NOTICES.items():
+            source = ROOT / ("cli" if json.loads((ROOT / "template.json").read_text())["initialized"] else "cli-starters/" + language) / "licenses" / name
+            # Synthetic delivery tests may select an unrelated language after initialization.
+            (resources / "licenses" / name).write_bytes(source.read_bytes() if source.is_file() else b"synthetic runtime notice")
         (resources / "logo.png").write_bytes(b"synthetic PNG fixture")
         (resources / "logo.svg").write_text("<svg/>", encoding="utf-8")
         (resources / "en.lproj").mkdir()
@@ -110,6 +119,7 @@ class DeliveryTests(unittest.TestCase):
 
     def write_status(self):
         self.status["input_sha256"] = input_digest(self.root)
+        self.status["output_sha256"] = output_digest(self.component)
         self.marker.write_text(json.dumps(self.status), encoding="utf-8")
 
     def package(self, **options):
@@ -140,8 +150,9 @@ class DeliveryTests(unittest.TestCase):
             path = self.root / "build" / target / filename
             path.parent.mkdir()
             path.write_bytes(synthetic_pe() if target == "windows-x64" else b"mock native slice")
+            record(self.root, target, path, True, "synthetic test")
             inputs.append(path)
-        with patch.dict(os.environ, {}, clear=True), patch.object(ci_config.subprocess, "run") as run:
+        with patch.dict(os.environ, {}, clear=True), patch("build_provenance.commit", return_value=None), patch.object(ci_config.subprocess, "run") as run:
             destination = ci_config.assemble(self.root)
         self.assertEqual(run.call_args_list, [
             unittest.mock.call(["lipo", "-create", str(inputs[0]), str(inputs[1]),
@@ -230,6 +241,18 @@ class DeliveryTests(unittest.TestCase):
                 self.package()
             resource.write_bytes(content)
 
+    def test_selected_runtime_notice_missing_or_empty_fails(self):
+        notice = self.component / "Resources/licenses/Go-LICENSE.txt"
+        original = notice.read_bytes()
+        for empty in (False, True):
+            if empty:
+                notice.write_bytes(b"")
+            else:
+                notice.unlink()
+            with self.assertRaisesRegex(ValueError, "redistribution notice"):
+                self.package()
+            notice.write_bytes(original)
+
     def test_fake_headers_rejected(self):
         self.mac.write_bytes(b"\xca\xfe\xba\xbe" + b"\0" * 64)
         with self.assertRaisesRegex(ValueError, "exactly Intel and ARM"):
@@ -291,12 +314,14 @@ class DeliveryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "input_sha256"):
             self.package()
 
-    def test_generated_syntax_and_compiled_outputs_do_not_invalidate_inputs(self):
+    def test_generated_syntax_does_not_invalidate_but_compiled_tampering_does(self):
         (self.component / "Resources/en.lproj/syntaxEN.json").write_text(
             '{"generated":true}', encoding="utf-8")
+        self.package()
         (self.project.parent / "DerivedData/CompiledCode/map.json").write_text(
             '{"generated":true}', encoding="utf-8")
-        self.package()
+        with self.assertRaisesRegex(ValueError, "output_sha256"):
+            self.package()
 
     def test_required_compiled_code_rejected_if_missing_or_empty(self):
         compiled = self.project.parent / "DerivedData" / "CompiledCode"
@@ -430,6 +455,14 @@ class DeliveryTests(unittest.TestCase):
                 ci_config.main()
             self.assertEqual(caught.exception.code, 2)
 
+    def test_manual_release_validates_explicit_tag_not_selected_branch_name(self):
+        environment = {"GITHUB_REPOSITORY": "owner/example-component",
+                       "GITHUB_REF_NAME": "main", "FOURD_ENABLED": "true"}
+        with patch.dict(os.environ, environment, clear=True), patch.object(
+                sys, "argv", ["ci_config.py", "validate", "--release", "--tag", "v0.1.0",
+                              "--root", str(self.root)]):
+            ci_config.main()
+
     def archive_bytes(self, name, data=b"tool4d", mode=stat.S_IFREG | 0o755):
         output = io.BytesIO()
         with zipfile.ZipFile(output, "w") as archive:
@@ -440,9 +473,9 @@ class DeliveryTests(unittest.TestCase):
 
     def download(self, data, digest=None):
         response = io.BytesIO(data)
-        response.geturl = lambda: "https://example.invalid/tool4d.zip"
+        response.geturl = lambda: "https://resources-download.4d.com/fixed/tool4d.zip"
         environment = {
-            "TOOL4D_URL": "https://example.invalid/tool4d.zip",
+            "TOOL4D_URL": "https://resources-download.4d.com/fixed/tool4d.zip",
             "TOOL4D_SHA256": digest or hashlib.sha256(data).hexdigest(),
         }
         with patch.dict(os.environ, environment, clear=True), patch.object(
@@ -453,6 +486,9 @@ class DeliveryTests(unittest.TestCase):
         executable = self.download(self.archive_bytes("tool4d.app/Contents/MacOS/tool4d"))
         self.assertEqual(executable.read_bytes(), b"tool4d")
         self.assertEqual(executable.stat().st_mode & 0o777, 0o755)
+        with self.assertRaisesRegex(ValueError, "already exists"):
+            self.download(self.archive_bytes("tool4d.app/Contents/MacOS/tool4d"))
+        self.assertEqual(executable.read_bytes(), b"tool4d")
 
     def test_tool4d_digest_and_unsafe_zip_rejected(self):
         with self.assertRaisesRegex(ValueError, "SHA-256 mismatch"):
@@ -502,8 +538,14 @@ class DeliveryTests(unittest.TestCase):
             with self.subTest(case=case), self.assertRaisesRegex(ValueError, "unsafe|symlink"):
                 self.download(self.tar_bytes(case))
 
+    def test_duplicate_archive_paths_rejected(self):
+        data = self.tar_bytes([("tool4d.app/file", b"one", None),
+                               ("tool4d.app/./file", b"two", None)])
+        with self.assertRaisesRegex(ValueError, "duplicate"):
+            self.download(data)
+
     def test_download_requires_concrete_pinned_url(self):
-        with patch.dict(os.environ, {"TOOL4D_URL": "https://example.invalid/latest/tool4d.tar.xz",
+        with patch.dict(os.environ, {"TOOL4D_URL": "https://resources-download.4d.com/latest/tool4d.tar.xz",
                                      "TOOL4D_SHA256": "0" * 64}, clear=True):
             with self.assertRaisesRegex(ValueError, "concrete build"):
                 ci_config.download_tool4d(self.root)

@@ -65,6 +65,10 @@ class InitializerTests(unittest.TestCase):
                             self.assertNotIn("component-cli", text, path)
                 self.assertIn("cs.AcmeHello.Greeting", (destination / "README.md").read_text())
                 self.assertTrue((component / "Resources" / "logo.png").is_file())
+                notices = {"go": "Go-LICENSE.txt", "rust": "Rust-LICENSE-MIT.txt"}
+                if language in notices:
+                    self.assertEqual((component / "Resources/licenses" / notices[language]).read_bytes(),
+                                     (destination / "cli/licenses" / notices[language]).read_bytes())
 
     def test_idempotence_and_reconfiguration_rejection(self):
         self.assertTrue(self.configure())
@@ -104,6 +108,13 @@ class InitializerTests(unittest.TestCase):
         self.assertEqual(settings.find(".//general").attrib["component_classStore_name"], "OtherSpace")
         catalog = ET.parse(self.root / "component/TemplateCLI/Project/Sources/catalog.4DCatalog")
         self.assertEqual(catalog.getroot().attrib["name"], "TemplateCLI")
+
+    def test_readme_provenance_urls_are_not_destination_identities(self):
+        readme = self.root / "README.md"
+        readme.write_text(readme.read_text() + "\nhttps://github.com/miyako/4d-component-template/pull/2\n")
+        self.configure()
+        self.assertIn("https://github.com/miyako/4d-component-template/pull/2", readme.read_text())
+        self.assertIn("component/hello-tools/", readme.read_text())
 
 
 class IconTests(unittest.TestCase):
