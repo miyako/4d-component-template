@@ -160,8 +160,8 @@ UTF-8, exactly one JSON line, LF on both systems, protocol version 1:
 
 | Invocation | Status / stdout / stderr |
 | --- | --- |
-| `hello-cli greet --name "4D"` | 0 / `{"protocol":1,"message":"Hello, 4D!"}` + LF / empty |
-| `hello-cli --version` | 0 / `{"protocol":1,"version":"0.1.0"}` + LF / empty |
+| `component-cli greet --name "4D"` | 0 / `{"protocol":1,"message":"Hello, 4D!"}` + LF / empty |
+| `component-cli --version` | 0 / `{"protocol":1,"version":"0.1.0"}` + LF / empty |
 | Invalid/unknown/missing/duplicate args, empty or malformed UTF-8 name | 2 / empty / error JSON below + LF |
 
 ```json
