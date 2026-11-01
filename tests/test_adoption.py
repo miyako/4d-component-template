@@ -122,7 +122,7 @@ class AdoptionTests(unittest.TestCase):
     def test_downloader_failure_and_nonvendor_url(self):
         with self.assertRaises(ValueError):
             ci_config.download_tool4d(self.root, url="https://untrusted.invalid/tool4d.zip", digest="0" * 64)
-        with patch.object(ci_config.urllib.request, "urlopen", side_effect=urllib.error.URLError("network failure")):
+        with patch.object(ci_config, "open_tool4d_url", side_effect=urllib.error.URLError("network failure")):
             with self.assertRaises(urllib.error.URLError):
                 ci_config.download_tool4d(self.root, url=ci_config.tool_pin(self.root)[0],
                                          digest=ci_config.tool_pin(self.root)[1])

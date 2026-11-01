@@ -289,6 +289,11 @@ locally, SHA256
 The pin is public versioned metadata in `package.json.tool`, not a credential.
 This archive is macOS ARM64 only, not a native Intel/Windows runtime.
 Local download checks native host compatibility plus safe extraction:
+The fixed vendor URL currently redirects to the official `builds2.4d.com`
+CDN. Every redirect is checked before following: only the exact vendor hosts
+over HTTPS/default TLS port, without URL credentials, are permitted. Expiring
+CDN query parameters are transport details, not user-configurable compiler pins;
+the archive must still match the approved SHA256 before extraction.
 
 ```sh
 python3 scripts/ci_config.py download-tool4d
@@ -354,6 +359,29 @@ After this workflow version is merged to the **default branch**, open
 **Actions → CI → Run workflow** and choose a branch for validation.
 Hosted 4D remains opt-in through `FOURD_ENABLED`; a CLI-only green run does not
 prove compilation or host loading.
+When `FOURD_ENABLED=true`, an initialized branch/PR/manual CI run also builds
+the actual compiled component and tests its unpacked ZIP. Download
+**Artifacts → compiled-component** from the completed run: it contains
+`REPOSITORY.zip` and adjacent `REPOSITORY.acceptance.json`, retained for 30 days.
+The evidence binds the ZIP SHA256/size, source revision, all three native build
+manifests, actual tool4d identity and source/compiler/final compiled-host reports.
+**component-acceptance-diagnostics** retains completed stages or failure details;
+failed acceptance does not upload an accepted component. This inspection path
+creates neither a tag nor a GitHub release and uses no Apple credentials.
+Intel/Windows **4D**, installed-release downloads and signing remain separate
+checks; hosted native CLI execution is not native 4D execution.
+
+The same non-publishing stage can be invoked after restoring same-revision
+native binaries and `build-manifest.json` files under `build/<target>/`:
+
+```sh
+python3 scripts/accept_hosted.py --root . --repository OWNER/REPOSITORY \
+  --tool4d .tools/tool4d.app/Contents/MacOS/tool4d
+```
+
+It requires `execution:"passed"` in each verified native manifest, reassembles
+resources, source-tests, compiles, packs and compiled-host-tests before saving
+stable evidence. Cross-only manifests are not hosted native evidence.
 
 **Actions → Release compiled component → Run workflow** requires `version_tag`:
 an **existing** `v<SemVer>` tag matching the initialized component version.

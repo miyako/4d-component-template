@@ -403,6 +403,10 @@ Supply both override values or neither; incomplete pairs fail. The explicit
 fixed flags above make this local command independent of repository variables. Require
 native-host compatibility and safe extraction: reject path traversal, escaping
 symlink chains, unsupported entries and checksum mismatch. Never bypass checks.
+The fixed download may redirect to the vendor's `builds2.4d.com` CDN; each hop
+is checked before following, allowing only those two exact HTTPS hosts without
+URL credentials or nonstandard ports. Signed CDN query strings are not compiler
+pins and never replace the fixed URL or archive SHA256.
 
 Run the actual stages (example version `0.1.0`, initialized destination only):
 
@@ -479,6 +483,16 @@ After the dispatch-capable workflow is merged to the **default branch**, open
 **Actions → CI → Run workflow** and select a branch for ordinary validation.
 `FOURD_ENABLED` still controls optional hosted 4D steps; CLI-only green is not
 compiled-host green.
+Initialized branch/PR/manual CI with `FOURD_ENABLED=true` retains
+**compiled-component** for 30 days: the accepted `dist/<repository>.zip` and
+adjacent `.acceptance.json` bind the ZIP hash/size, revision, native manifests,
+tool4d identity and source/compiler/final compiled-host evidence. Download it
+from the run's **Artifacts** without publishing a release. Separate
+**component-acceptance-diagnostics** preserves completed reports on failure.
+`scripts/accept_hosted.py --repository OWNER/REPOSITORY --tool4d PATH` consumes
+all three same-revision native artifacts/manifests (each `execution:"passed"`),
+reassembles and runs the actual source/compile/package/final-host pipeline.
+It never publishes, signs, or marks unexecuted Intel/Windows 4D as passed.
 
 **Actions → Release compiled component → Run workflow** requires
 `version_tag`, an **already existing** `v<SemVer>` tag matching the initialized
