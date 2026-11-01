@@ -1,0 +1,99 @@
+name: Release compiled component
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Require initialized matching repository, version tag and explicit 4D opt-in
+        env:
+          FOURD_ENABLED: ${{ vars.FOURD_ENABLED }}
+        run: python scripts/ci_config.py validate --release
+
+  native:
+    needs: gate
+    uses: ./.github/workflows/ci.yml
+
+  compile:
+    needs: native
+    runs-on: macos-15
+    env:
+      FOURD_ENABLED: ${{ vars.FOURD_ENABLED }}
+      TOOL4D_URL: ${{ vars.TOOL4D_URL }}
+      TOOL4D_SHA256: ${{ vars.TOOL4D_SHA256 }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python scripts/ci_config.py validate --release
+      - uses: actions/download-artifact@v4
+        with:
+          name: component-resources
+          path: build/resources
+      - name: Restore validated native resources
+        shell: python
+        run: |
+          import pathlib, shutil, sys
+          sys.path.insert(0, "scripts")
+          from ci_config import load_config
+          from package_component import validate_resources
+          config = load_config(initialized=True)
+          component = pathlib.Path("component") / config["repository"]
+          destination = component / "Resources" / "bin"
+          shutil.copytree("build/resources", destination, dirs_exist_ok=True)
+          mac, windows = validate_resources(component, config["cli"])
+          mac.chmod(0o755)
+          windows.chmod(0o755)
+      - name: Download SHA-256-verified tool4D
+        run: python scripts/ci_config.py download-tool4d
+      - name: Test interpreted component from a real 4D host before compilation
+        run: python scripts/test_4d.py --tool4d .tools/tool4d.app/Contents/MacOS/tool4d
+      - name: Compile both 4D targets (no source-only fallback)
+        run: python scripts/compile_component.py --tool4d .tools/tool4d.app/Contents/MacOS/tool4d
+      - name: Package unsigned compiled dependency-manager component
+        run: python scripts/package_component.py --unpack-test
+      - name: Require real host tests against the actual compiled release component
+        shell: python
+        run: |
+          import pathlib, subprocess, sys
+          sys.path.insert(0, "scripts")
+          from ci_config import load_config
+          config = load_config(initialized=True)
+          component = pathlib.Path("build/release-test") / (config["repository"] + ".4dbase")
+          subprocess.run([sys.executable, "scripts/test_4d.py", "--tool4d",
+                          ".tools/tool4d.app/Contents/MacOS/tool4d",
+                          "--component", str(component)], check=True)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: compiled-release
+          path: dist/*.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: compile
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: compiled-release
+          path: dist
+      - name: Publish only after compilation and packaging succeed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$RELEASE_TAG" dist/*.zip --verify-tag --title "$RELEASE_TAG" --notes "Unsigned compiled component with universal macOS and x64 Windows CLI resources. Interpreted class and method sources are excluded. This artifact is not signed or notarized. Built with the free tool4D compiler from an explicitly SHA-256-pinned download."
