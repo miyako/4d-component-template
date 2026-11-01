@@ -18,7 +18,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from initialize import initialize
 from initialize import github_repository
 from rename_feature import rename_feature
-from build_provenance import record, verify
+from build_provenance import commit, record, verify
 from build_cli import smoke_test
 from doctor import doctor
 import accept_local
@@ -34,7 +34,8 @@ class AdoptionTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         for name in ("component", "cli-starters", "tests/host"):
             shutil.copytree(ROOT / name, self.root / name)
-        for name in ("template.json", "package.json", "README.md", "LICENSE", "AGENTS.md", ".gitattributes"):
+        for name in ("template.json", "package.json", "README.md", "LICENSE", "AGENTS.md",
+                     ".gitattributes", "release-policy.json"):
             shutil.copy2(ROOT / name, self.root / name)
         initialize(self.root, "UuidTest", "UuidTest", "uuid-test", "go", "Feature decisions remain required")
 
@@ -253,6 +254,7 @@ class AdoptionTests(unittest.TestCase):
         shutil.copy2(archive, destination / archive.name)
         report["artifact"]["path"] = str(destination / archive.name)
         report["fixture_disposed"] = True
+        report["template_commit"] = commit(ROOT)
         report["scope"] = "local starter identity/wiring regression, not UUID feature acceptance"
         (destination / "UuidTest.acceptance.json").write_text(json.dumps(report, indent=2) + "\n")
 

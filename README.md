@@ -389,18 +389,35 @@ It does not create a tag. The gate resolves the tag to a commit SHA, then every
 native build, assembly, compilation and publication job uses that exact SHA,
 not the UI-selected branch. Version/repository/4D gates and final unpacked
 compiled-host acceptance are mandatory. Before publication the tag is refreshed
-and checked against that SHA, then `gh release create --verify-tag` is used.
+and checked against that SHA; downloaded assets are checked against the accepted
+hashes, sizes, revision, native manifests and full host contracts before
+`gh release create --verify-tag` is used. Signing policy is also read at the
+resolved tag revision. The optional **require_apple_signing** checkbox escalates
+an unsigned version to signed; leaving it unchecked never downgrades a
+policy-required signed version.
 Do not dispatch publication or create tags without approval. Merely opening
 this PR does not make the new **Run workflow** button available in the default
 template; the workflow file must first merge.
 
 ### Optional signing/notarization
 
-**Registering Apple secrets does not enable signing.** The current
-`.github/workflows/release.yml` creates an **unsigned** component and does not
-consume any of the seven secrets below. They are credentials for a future,
-explicitly implemented opt-in signing/notarization workflow, not prerequisites
-for the free local tool4d compiler or this unsigned release workflow.
+**Unsigned is the default; signing is implemented and opt-in.**
+`release-policy.json` has `schema:1` and an initially empty
+`apple_notarized_versions` array. To require signing for a component release,
+commit its exact version (without `v`) before creating its tag:
+
+```json
+{"schema":1,"apple_notarized_versions":["0.1.0"]}
+```
+
+The policy is independent of repository, namespace, CLI and selected language.
+Initialization preserves it. A missing policy or an unlisted version is
+unsigned; malformed policy fails closed. Alternatively, check
+**require_apple_signing** for a manual release dispatch. That flag can only
+escalate, never downgrade the version policy. The policy gate accesses no
+secrets and emits `apple_signing`; only its signed branch receives the seven
+credentials below. Unsigned CI/local acceptance and unsigned publication need
+none of them. Registering credentials alone does not change the policy.
 
 In the **newly generated repository**, register private credentials under
 **Settings → Secrets and variables → Actions → Secrets → New repository secret**.
@@ -426,19 +443,61 @@ secrets. Supply both or neither; incomplete/invalid overrides fail.
 GitHub supplies `GITHUB_TOKEN` automatically; only the publish job grants it
 `contents: write`. Do not register a personal token for this workflow.
 
-Signing is **not required** by this unsigned build/release pipeline. PDF references
-sign macOS distributions; their release policy is not an intrinsic 4D requirement.
-Windows Authenticode and Apple notarization are not configured here.
+The implemented `scripts/sign_release.py` validates all credentials before
+signing and requires the checkout to equal the resolved release SHA. It
+reproduces the current unsigned ZIP from verified compilation inputs, then
+signs an **isolated distribution copy** of the universal CLI and native Mach-O
+Libraries with Developer ID, hardened runtime and timestamp verification.
+It never edits the compiler marker or signs the original compiler outputs.
+The helper signs a DMG, requires notarization JSON **Accepted**, staples and
+validates that DMG, mounts the final container and repacks the dependency-manager
+ZIP from its actual contents. Temporary keychain, certificate and owned mounts
+are cleaned on success or failure. Windows Authenticode is not implemented.
 
-For production, explicitly add opt-in signing before final package validation:
-certificate/password, ephemeral keychain password, identity and notarization
-credentials in Actions **secrets only**; minimum entitlements; fail each codesign
-error; require notarization JSON `Accepted`; clean temporary keychain in
-`always()`; retest the final signed package. Bare CLI executables cannot be
-stapled. Stapling a signed container and Apple's recommended `Contents/` component
-layout require deliberate packaging changes. Never `continue-on-error` signing.
-Gatekeeper/quarantine can block unsigned downloaded executables; no runtime
-trust bypass is supplied.
+The release stage source-tests, compiles, packages and tests the unsigned
+component before signing, then unpacks the **final ZIP** and requires actual
+compiled-host acceptance again. Both ZIP levels retain explicit nested
+directories, executable modes, source stripping and external Libraries;
+the `.4dbase` does not gain an application `Contents/` layout. The DMG is the
+notarized/stapled container; bare executables and the ZIP itself are not stapled.
+Signing timestamps/notarization are not bit-for-bit reproducibility promises.
+
+Accepted release artifacts contain `REPOSITORY.zip`,
+`REPOSITORY.acceptance.json`, and in signed mode `REPOSITORY.dmg` plus
+`REPOSITORY-signing.json`. The acceptance report binds all asset hashes/sizes,
+source revision, native manifests, compiler provenance, unsigned host and exact
+final compiled-host results. Publication verifies the downloaded artifact set
+again and refuses missing, modified, mixed-revision or unvalidated assets.
+Download the ZIP for Dependency manager/manual `.4dbase` installation, or mount
+the signed DMG for the same component payload. Preserve both evidence JSON files
+with the artifacts. Native Intel/Windows 4D, installed-release downloads and
+signing validation on other destinations remain separate observations.
+Gatekeeper/quarantine can block unsigned downloads; no runtime trust bypass or
+silent unsigned fallback is supplied.
+
+The helper and its mocked vendor-tool regressions are reused byte-for-byte from
+MIT-licensed [miyako/UuidTest commit 7e0cfab](https://github.com/miyako/UuidTest/tree/7e0cfab983a582994e12c79c09aa47a205ea4bfc).
+Its [actual v0.1.0 release run](https://github.com/miyako/UuidTest/actions/runs/41270374443)
+executed signing, notarization, stapling and exact final ZIP host acceptance.
+The [public signing proof](https://github.com/miyako/UuidTest/releases/download/v0.1.0/UuidTest-signing.json)
+records `Accepted`; its original writer also verified public download hashes,
+strict signatures/stapling and actual downloaded ZIP host loading. This is
+evidence for that helper/revision/destination, not a claim that this uninitialized
+template or every adopter was signed or validated on every native platform.
+
+### Lifecycle checklist
+
+Create the destination with **Use this template**, initialize its exact name and
+one selected language, then replace the feature/API/docs/CLI and host contracts.
+Commit the feature, notices and pinned dependencies. Set the generated
+repository's **FOURD_ENABLED=true** variable; choose unsigned policy or commit
+a signed version and register its seven secrets. Run **CI → Run workflow** to
+inspect the compiled ZIP/evidence without publication. After approval, create
+the matching version tag and use **Release compiled component → Run workflow**
+with that existing tag (or let its tag push trigger the same gates). Download
+the exact-name ZIP and evidence from the accepted GitHub release. Workflow
+buttons require the workflow to exist on the default branch; selecting a branch
+never overrides the release tag's resolved source SHA.
 
 ## Icons
 

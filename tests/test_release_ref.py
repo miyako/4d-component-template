@@ -158,10 +158,10 @@ class ReleaseRefTests(unittest.TestCase):
         self.assertIn("release_call: true", release)
         self.assertEqual(release.count("ref: ${{ needs.gate.outputs.source_sha }}"), 2)
         self.assertEqual(release.count('validate --release --tag "$RELEASE_TAG"'), 2)
-        self.assertIn('package_component.py --tag "$RELEASE_TAG" --unpack-test', release)
-        self.assertLess(release.index("release_ref.py verify"), release.index("gh release create"))
+        self.assertIn('--tool4d .tools/tool4d.app/Contents/MacOS/tool4d --tag "$RELEASE_TAG"', release)
+        self.assertLess(release.index("release_ref.py verify"), release.index("release_assets.py"))
         self.assertIn('git fetch --force --no-tags origin "+refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"', release)
-        self.assertIn("--verify-tag", release)
+        self.assertIn("--verify-tag", (ROOT / "scripts/release_assets.py").read_text())
 
 
 if __name__ == "__main__":

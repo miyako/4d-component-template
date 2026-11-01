@@ -45,8 +45,14 @@ scripts/tests. Resolve all paths below from the repository root, not this folder
    paths, `passed` / `failed` / `not_run` per check and blockers. Partial local success
    is **NOT release ready**. Do not publish or add credentials without approval.
    Unsigned free tool4d local compilation needs no license/signing secrets.
-   The current release workflow consumes none of the seven Apple secrets
-   documented in AGENTS.md; registering them does not enable signing.
+   Manual initialized CI with `FOURD_ENABLED=true` retains an accepted compiled
+   ZIP and adjacent evidence without publishing. Release signing is implemented:
+   `release-policy.json.apple_notarized_versions` defaults to unsigned; a listed
+   version or manual `require_apple_signing` opts in. Only that branch receives
+   the seven secrets, signs an isolated copy, notarizes/staples its DMG, repacks
+   the ZIP from the final mounted DMG and reruns exact final ZIP compiled-host
+   acceptance. Missing credentials or signing errors never downgrade to unsigned.
+   Existing-tag SHA and downloaded asset/hash/host-evidence gates precede publication.
 
 ## Discovery is supported, invocation is not guaranteed
 

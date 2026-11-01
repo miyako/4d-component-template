@@ -493,7 +493,9 @@ from the run's **Artifacts** without publishing a release. Separate
 `scripts/accept_hosted.py --repository OWNER/REPOSITORY --tool4d PATH` consumes
 all three same-revision native artifacts/manifests (each `execution:"passed"`),
 reassembles and runs the actual source/compile/package/final-host pipeline.
-It never publishes, signs, or marks unexecuted Intel/Windows 4D as passed.
+It never publishes or marks unexecuted Intel/Windows 4D as passed. Its default
+inspection path is unsigned; release signing uses the explicit
+`--require-apple-signing` path documented below.
 
 **Actions → Release compiled component → Run workflow** requires
 `version_tag`, an **already existing** `v<SemVer>` tag matching the initialized
@@ -503,6 +505,12 @@ SHA, and all reusable native CI, assembly, compilation and publication jobs use
 that exact SHA—not the selected UI branch. Packaging receives the normalized
 tag explicitly. Publication refreshes and verifies the tag has not moved, uses
 `--verify-tag`, and remains blocked by compilation or final host failure.
+`release_assets.py` also rechecks the downloaded ZIP/DMG/proof bytes against
+accepted hashes/sizes, revision, native manifests and full source/final-host
+contracts before passing a literal validated asset list to GitHub.
+Signing policy is read at the resolved tag SHA. Manual
+`require_apple_signing` can escalate an unsigned version but cannot downgrade
+a policy-required signed version.
 Do not manually dispatch publication or create a tag without user permission.
 The new workflow is not available in the default template before its PR merges.
 
@@ -573,7 +581,8 @@ resources, compile fresh, and load the **exact final ZIP's** unpacked component.
 Report unsupported/unavailable checks as `not_run`; local success remains
 `release_ready:false`. Approved publication additionally requires the existing
 matching tag, all required native artifact/tests, hosted 4D opt-in and the final
-package-host gate. Signing is optional for the existing unsigned release.
+package-host gate. Signing is optional by default; a listed version or explicit signed dispatch
+requires every signing/notarization gate to pass before publication.
 
 The final handoff must identify the repository/namespace/class/CLI/language,
 revision and input provenance, exact commands/results, tool versions, stable ZIP
@@ -632,21 +641,60 @@ Never claim this deterministic file-presence check is a legal audit.
 
 Signing is not a prerequisite for unsigned development/package acceptance.
 Gatekeeper/quarantine may still block unsigned downloads; do not add a runtime
-trust bypass. If the user explicitly opts into signing, store certificates and
-passwords in **secrets only**, use minimum entitlements, fail closed, require
-notarization `Accepted`, clean temporary keychains even on failure and test the
-final signed compiled package. Bare CLI executables cannot be stapled; a signed
-container/Apple `Contents/` layout requires deliberate packaging changes.
+trust bypass. The implemented signing path stores credentials in **secrets only**,
+uses hardened runtime/timestamp verification, fails closed, requires notarization
+`Accepted`, cleans temporary keychains/certificates and owned mounts even on
+failure, and tests the exact final signed ZIP's unpacked compiled component.
+Bare CLI executables are not stapled: the DMG is the notarized/stapled container.
+The ZIP is repacked from its actual final mounted component, preserving the
+existing `.4dbase` layout without introducing an application `Contents/` tree.
 
-### Seven Apple secrets: registration is not implementation
+### Version policy and seven Apple secrets
 
-The current `.github/workflows/release.yml` is **unsigned** and consumes **none**
-of these seven secrets. Merely registering them does **not** enable signing or
-notarization. Implementing a signing workflow is separate, explicitly approved
-scope; this playbook documents credential types, not an implemented integration.
-No secret below is required by the free local compiler or unsigned acceptance.
+`release-policy.json` is independent of template identity and is preserved by
+initialization. It defaults to
+`{"schema":1,"apple_notarized_versions":[]}`. List exact component versions
+without `v` to require signed releases; commit the policy before creating the
+matching tag. A missing policy or unlisted version means unsigned, malformed
+policy fails closed. Manual release `require_apple_signing` and the helper's
+`--require-apple-signing` can only escalate, never downgrade policy.
+`scripts/sign_release.py policy --root .` emits `apple_signing` without accessing
+secrets; the workflow passes credentials only to the policy-true stage.
+Merely registering secrets does not change policy, and no secret below is
+required by the free local compiler, unsigned CI inspection or unsigned release.
 
-For a future approved integration, register private values in the **destination**
+The signed release runs the same verified native assembly, source-host,
+compilation and deterministic unsigned packaging pipeline, then tests the
+unsigned compiled ZIP. `sign_release.py sign --root . --require-apple-signing`
+requires the checkout HEAD to match resolved `RELEASE_SHA`/`RELEASE_TAG`,
+validates compiler input/output provenance and reproduces the fresh unsigned
+ZIP before signing an isolated copy. It signs the universal CLI and native
+Mach-O Libraries, verifies Developer ID/team/runtime/timestamp, signs a DMG,
+requires actual notarization JSON `Accepted`, staples and validates it, and
+rebuilds the final ZIP from that mounted final DMG. Original compiler outputs
+and markers are not edited. The source-host gate is enforced by the orchestrator;
+the helper does not pretend a source-host filename is its input contract.
+
+`accept_hosted.py --require-apple-signing` reruns actual host assertions against
+the final ZIP after signing. It revalidates original compiler provenance and
+binds all final asset hashes, refusing changes during host testing. Stable
+outputs are `dist/<repository>.zip`, `.dmg`, `-signing.json` and
+`.acceptance.json`; the latter contains distinct source/compiler/unsigned-host/
+signing/final-host evidence. Signing timestamps and notarization are not
+bit-for-bit reproducibility promises. Windows Authenticode is not implemented.
+Never claim a template fixture was Apple-signed using another destination's
+credentials or that a successful CLI/notary check proves native Intel/Windows
+4D loading or Dependency manager installation.
+The helper and its mocked-tool tests are reused unchanged from
+[miyako/UuidTest 7e0cfab](https://github.com/miyako/UuidTest/tree/7e0cfab983a582994e12c79c09aa47a205ea4bfc)
+after its [actual release run](https://github.com/miyako/UuidTest/actions/runs/41270374443)
+and public-download signing/stapling/final compiled-host verification succeeded.
+Its [public proof](https://github.com/miyako/UuidTest/releases/download/v0.1.0/UuidTest-signing.json)
+keeps `hostValidation:"required-after-signing"`; the separate final host report
+fulfills that requirement. Do not rewrite the helper's proof to pretend it ran
+the caller's host stage.
+
+For approved signed releases, register private values in the **destination**
 repository under **Settings → Secrets and variables → Actions → Secrets → New
 repository secret**. Template creation does not inherit repository secrets or
 variables. Never place certificates/private keys/passwords in source, workflow

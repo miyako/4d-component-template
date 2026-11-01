@@ -15,4 +15,8 @@ Require same-revision binaries, actual source host tests, real compilation and
 host tests against the unpacked source-stripped compiled ZIP. Report `not_run`
 separately from `passed`; partial local acceptance is NOT release ready.
 Follow AGENTS.md for fixed free tool4d, licensing, packaging and optional signing.
+Version signing policy defaults to unsigned; signed opt-in uses the implemented
+isolated signing/notarized-DMG path and must retest the exact final ZIP.
+Manual CI retains compiled ZIP/evidence without publication; releases verify
+the existing tag SHA and downloaded accepted asset hashes before publishing.
 Unsigned local acceptance needs no license activation or signing secrets.

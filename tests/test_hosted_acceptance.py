@@ -5,6 +5,7 @@ import subprocess
 import sys
 import unittest
 from unittest.mock import patch
+import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -33,15 +34,16 @@ class HostedAcceptanceTests(unittest.TestCase):
         self.host_calls.append(component is not None)
         return {"success": True, "finished": True, "compiled": component is not None}
 
-    def accept(self):
+    def accept(self, signed=False, subprocess_run=None):
         with patch.object(accept_hosted, "require_tool4d_host"), patch.object(
                 accept_hosted, "assemble"), patch.object(
                 accept_hosted, "compile_component", return_value=self.fixture.status), patch.object(
                 accept_hosted, "test_4d", side_effect=self.host), patch.object(
-                accept_hosted.subprocess, "run",
+                accept_hosted.subprocess, "run", side_effect=subprocess_run,
                 return_value=subprocess.CompletedProcess([], 0, "tool4d 20.7 101905\n", "")), patch(
-                "build_provenance.commit", return_value=None):
-            return accept_hosted.accept(self.root, "owner/example-component", self.tool, "v0.1.0")
+                "build_provenance.commit", return_value=None), patch.object(
+                accept_hosted, "commit", return_value="a" * 40 if signed else None):
+            return accept_hosted.accept(self.root, "owner/example-component", self.tool, "v0.1.0", signed)
 
     def test_accepted_zip_has_embedded_native_and_both_host_reports(self):
         report = self.accept()
@@ -93,6 +95,80 @@ class HostedAcceptanceTests(unittest.TestCase):
         self.assertEqual(report["steps"]["package"]["status"], "failed")
         self.assertEqual(report["steps"]["compiled_host"]["status"], "not_run")
         self.assertFalse((self.root / "dist/example-component.acceptance.json").exists())
+
+    def test_required_signing_never_downgrades_when_helper_is_missing(self):
+        with self.assertRaisesRegex(ValueError, "verified scripts/sign_release"):
+            self.accept(signed=True)
+        report = json.loads((self.root / "build/hosted-acceptance.json").read_text())
+        self.assertEqual(self.host_calls, [False, True])
+        self.assertEqual(report["steps"]["signing"]["status"], "failed")
+        self.assertEqual(report["steps"]["compiled_host"]["status"], "not_run")
+        self.assertFalse(report["finished"])
+        self.assertFalse((self.root / "dist/example-component.acceptance.json").exists())
+
+    def test_signing_boundary_tests_exact_final_zip_and_binds_all_assets(self):
+        helper = self.root / "scripts/sign_release.py"
+        helper.parent.mkdir()
+        helper.write_text("# synthetic boundary fixture; never executed\n")
+        commands = []
+
+        def run(arguments, **options):
+            commands.append(arguments)
+            if arguments[1:3] == [str(helper), "sign"]:
+                archive = self.root / "dist/example-component.zip"
+                with accept_hosted.unpack_for_test(self.root, archive).joinpath(
+                        "Resources/signed-boundary.txt").open("wb") as output:
+                    output.write(b"synthetic signed fixture, not Apple verification")
+                with zipfile.ZipFile(archive, "a") as packed:
+                    packed.writestr("example-component.4dbase/Resources/signed-boundary.txt",
+                                    b"synthetic signed fixture, not Apple verification")
+                dmg = archive.with_suffix(".dmg")
+                dmg.write_bytes(b"synthetic DMG")
+                unsigned = json.loads((self.root / "build/hosted-acceptance.json").read_text())[
+                    "unsigned_artifact"]
+                proof = {
+                    "schema": 1, "version": "0.1.0", "sourceSHA": "a" * 40, "releaseTag": "v0.1.0",
+                    "unsignedCompileInputSHA256": self.fixture.status["input_sha256"],
+                    "unsignedZIPHashSHA256": unsigned["sha256"],
+                    "hostValidation": "required-after-signing",
+                    "signedFiles": [{"path": path, "verified": True} for path in (
+                        "Resources/bin/macOS/example-cli", "Libraries/lib4d-arm64.dylib")],
+                    "notarization": {"status": "Accepted",
+                                     "submissionUUID": "12345678-1234-4321-8765-123456789abc"},
+                    "dmg": {"stapled": True, "validated": True, "sha256": accept_hosted.sha256(dmg)},
+                    "zip": {"stapled": False, "notarizedViaDMG": True,
+                            "origin": "final-mounted-accepted-DMG", "sha256": accept_hosted.sha256(archive)},
+                }
+                (archive.parent / "example-component-signing.json").write_text(json.dumps(proof))
+            return subprocess.CompletedProcess(arguments, 0, "tool4d 20.7 101905\n", "")
+
+        def host(root, tool, component=None):
+            self.host_calls.append(component is not None)
+            if len(self.host_calls) == 3:
+                self.assertTrue((component / "Resources/signed-boundary.txt").is_file())
+            return {"success": True, "finished": True, "compiled": component is not None}
+
+        with patch.object(self, "host", side_effect=host):
+            report = self.accept(signed=True, subprocess_run=run)
+        self.assertEqual(self.host_calls, [False, True, True])
+        self.assertEqual(report["steps"]["signing"]["status"], "passed")
+        self.assertNotEqual(report["unsigned_artifact"]["sha256"], report["artifact"]["sha256"])
+        self.assertEqual(len(report["assets"]), 3)
+        for asset in report["assets"]:
+            self.assertEqual(accept_hosted.sha256(self.root / asset["path"]), asset["sha256"])
+        self.assertIn([sys.executable, str(helper), "sign", "--root", str(self.root),
+                       "--require-apple-signing"], commands)
+
+    def test_zero_exit_without_signing_assets_cannot_approve_release(self):
+        helper = self.root / "scripts/sign_release.py"
+        helper.parent.mkdir()
+        helper.write_text("# synthetic helper boundary\n")
+        with self.assertRaisesRegex(ValueError, "did not produce"):
+            self.accept(signed=True)
+        report = json.loads((self.root / "build/hosted-acceptance.json").read_text())
+        self.assertEqual(report["steps"]["signing"]["status"], "failed")
+        self.assertEqual(report["steps"]["compiled_host"]["status"], "not_run")
+        self.assertFalse(report["finished"])
 
     def test_manual_ci_uploads_component_not_just_executables(self):
         workflow = (ROOT / ".github/workflows/ci.yml").read_text()
