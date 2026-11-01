@@ -29,6 +29,11 @@ Function _decode($result : Object; $field : Text)->$decoded : Object
 		$result.error:=New object("code"; "invalid_protocol"; "message"; "CLI response must be a JSON object"; "details"; $parseErrors)
 		return $result
 	End if
+	If ((Value type($payload.protocol)#Is real) & (Value type($payload.protocol)#Is longint))
+		$result.ok:=False
+		$result.error:=New object("code"; "invalid_protocol"; "message"; "Unsupported CLI protocol version")
+		return $result
+	End if
 	If (($payload.protocol#1) | (Value type($payload[$field])#Is text))
 		$result.ok:=False
 		$result.error:=New object("code"; "invalid_protocol"; "message"; "Unsupported CLI protocol version")
