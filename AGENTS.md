@@ -423,7 +423,8 @@ python3 scripts/test_4d.py --root . --tool4d .tools/tool4d.app/Contents/MacOS/to
    `Components/`. The local dependency path names the package root, not the anchor.
    Source staging drops DerivedData to avoid interpreted tests loading stale
    compiled code. Isolated host/request/status paths include Unicode, spaces and
-   both quote characters on POSIX (quotes are invalid in Windows filenames);
+   both quote characters on POSIX (double quotes are invalid in Windows filenames;
+   the Windows fixture deliberately uses Unicode and spaces without either quote);
    copies reject symlinks. A renamed copy of the actual native CLI also verifies
    executable-path handling, not merely argument quoting. These tests require actual
    runtime execution on each OS to establish native quoting behavior.

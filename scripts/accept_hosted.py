@@ -4,6 +4,7 @@ import argparse
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+import platform
 import subprocess
 
 from build_provenance import commit, sha256, verify
@@ -21,6 +22,7 @@ def accept(root, repository, tool4d, tag=None):
     output.parent.mkdir(parents=True, exist_ok=True)
     report = {
         "schema": 1, "scope": "hosted", "commit": commit(root),
+        "host": {"system": platform.system(), "machine": platform.machine()},
         "started_at": datetime.now(timezone.utc).isoformat(),
         "result": "failed", "finished": False, "release_ready": False,
         "steps": {name: {"status": "not_run", "reason": "not exercised"} for name in (

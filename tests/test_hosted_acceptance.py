@@ -84,6 +84,16 @@ class HostedAcceptanceTests(unittest.TestCase):
         self.assertEqual(report["steps"]["compiled_host"]["status"], "failed")
         self.assertFalse((self.root / "dist/example-component.acceptance.json").exists())
 
+    def test_failed_compile_marker_cannot_upload_a_source_shaped_success(self):
+        self.fixture.marker.unlink()
+        with self.assertRaisesRegex(ValueError, "compile-status"):
+            self.accept()
+        report = json.loads((self.root / "build/hosted-acceptance.json").read_text())
+        self.assertFalse(report["finished"])
+        self.assertEqual(report["steps"]["package"]["status"], "failed")
+        self.assertEqual(report["steps"]["compiled_host"]["status"], "not_run")
+        self.assertFalse((self.root / "dist/example-component.acceptance.json").exists())
+
     def test_manual_ci_uploads_component_not_just_executables(self):
         workflow = (ROOT / ".github/workflows/ci.yml").read_text()
         self.assertIn('accept_hosted.py --repository "$GITHUB_REPOSITORY"', workflow)
