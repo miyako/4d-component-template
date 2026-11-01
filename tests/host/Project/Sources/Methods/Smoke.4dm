@@ -1,10 +1,12 @@
 //%attributes = {"invisible":true}
 var $ignored : Integer
 var $parameter; $name; $target : Text
+var $folderPath : Text
 var $request; $result; $report : Object
 var $tool : cs.TemplateCLI.Greeting
 var $requestFile; $statusFile : 4D.File
 var $cases : Collection
+var $invalid : Variant
 $ignored:=Get database parameter(User param value; $parameter)
 If (Is Windows)
 	$requestFile:=File($parameter; fk platform path)
@@ -80,6 +82,27 @@ If (Not($result.ok))
 	$report.success:=False
 Else
 	If (JSON Parse($result.stdout).message#("Hello, "+$parameter+"!"))
+		$report.success:=False
+	End if
+End if
+$report.rejectedArguments:=New collection
+For each ($invalid; New collection(123; 1.25; True; False; Null; Current date; Current time; New collection; New object))
+	$result:=cs.TemplateCLI._Process.new().execute($requestFile; New collection($invalid))
+	$report.rejectedArguments.push(New object("type"; Value type($invalid); "result"; $result))
+	If ($result.ok | ($result.error.code#"invalid_argument"))
+		$report.success:=False
+	End if
+End for each
+$result:=cs.TemplateCLI._CLI.new("component-cli"; $target).execute(New collection("greet"; "--name"; $requestFile.parent))
+$report.folderArgument:=$result
+$folderPath:=$requestFile.parent.path
+If (Is Windows)
+	$folderPath:=$requestFile.parent.platformPath
+End if
+If (Not($result.ok))
+	$report.success:=False
+Else
+	If (JSON Parse($result.stdout).message#("Hello, "+$folderPath+"!"))
 		$report.success:=False
 	End if
 End if

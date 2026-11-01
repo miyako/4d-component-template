@@ -47,6 +47,9 @@ Function execute($file : 4D.File; $arguments : Collection)->$result : Object
 	End if
 	$command:=This.quote($file.path)
 	For each ($value; $arguments)
+		If ((Value type($value)#Is text) & (Value type($value)#Is object))
+			return New object("ok"; False; "error"; New object("code"; "invalid_argument"; "message"; "Arguments must be Text, File or Folder"))
+		End if
 		Case of
 			: (Value type($value)=Is text)
 				$argument:=$value
