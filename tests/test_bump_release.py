@@ -127,6 +127,18 @@ class BumpReleaseTests(unittest.TestCase):
                 bump_release.next_version(self.root, mode, tags=["v1.2.3"])
         self.assertEqual(before, self.snapshot())
 
+    def test_empty_optional_feature_version_is_rejected_on_equal_retry(self):
+        self.configure()
+        feature = self.root / "component/CaseTools/Project/Sources/Classes/Greeting.4dm"
+        feature.write_text(feature.read_text() + '\nFunction fixtureVersion()\n\tThis.version:=""\n')
+        before = self.snapshot()
+        with self.assertRaisesRegex(ValueError, "inconsistent"):
+            bump_release.apply(self.root, "0.1.0", stage=True)
+        with self.assertRaisesRegex(ValueError, "inconsistent"):
+            bump_release.next_version(self.root, "patch", tags=["v0.0.9"])
+        self.assertEqual(before, self.snapshot())
+        self.assertEqual(self.git("diff", "--cached", "--name-only"), "")
+
     def test_stage_adds_only_changed_paths_and_empty_retry_is_noop(self):
         self.configure()
         self.git("add", "--", ".")

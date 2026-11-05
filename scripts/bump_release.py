@@ -114,12 +114,12 @@ def plan(root, version, repository=None):
 
     # These are protocol examples, not arbitrary SemVer mentions in prose, URLs,
     # dependency manifests, compiler pins, or historical release instructions.
-    protocol = r'(?:"protocol"|protocol)\s*:\s*1\s*,\s*(?:"version"|version)\s*:\s*"(?P<version>[^"\r\n]+)"'
+    protocol = r'(?:"protocol"|protocol)\s*:\s*1\s*,\s*(?:"version"|version)\s*:\s*"(?P<version>[^"\r\n]*)"'
     assignment = (
         r'(?i:\b(?:const|var|let|constexpr)\s+'
         r'(?:(?:char\s*\*|std::string_view|auto)\s*)?'
         r'(?:component_?version|cli_?version|kVersion|version)\b'
-        r'(?:\s*:\s*[^=\r\n]+|\s+string)?\s*=\s*")(?P<version>[^"\r\n]+)"')
+        r'(?:\s*:\s*[^=\r\n]+|\s+string)?\s*=\s*")(?P<version>[^"\r\n]*)"')
     component = Path("component") / config["repository"]
     feature = config.get("feature_class", "Greeting")
     source = {"go": "cli/main.go", "rust": "cli/src/main.rs", "cpp": "cli/main.cpp"}[config["language"]]
@@ -163,7 +163,7 @@ def plan(root, version, repository=None):
         # Combine independent CMake surfaces in memory if both are present.
         before = read(cmake)
         pattern = (r'(?i:\bset\(\s*(?:COMPONENT_VERSION|CLI_VERSION)\s+")'
-                   r'(?P<version>[^"\r\n]+)"')
+                   r'(?P<version>[^"\r\n]*)"')
         for match in re.finditer(pattern, before):
             if match["version"] != old:
                 raise ValueError(f"inconsistent component version in {cmake}")
@@ -173,7 +173,7 @@ def plan(root, version, repository=None):
 
     feature_path = component / "Project/Sources/Classes" / (feature + ".4dm")
     # Adopted features sometimes expose a component version on the constructor.
-    literal(feature_path, r'(?i:\bThis\.(?:componentVersion|cliVersion|version)\s*:=\s*")(?P<version>[^"\r\n]+)"')
+    literal(feature_path, r'(?i:\bThis\.(?:componentVersion|cliVersion|version)\s*:=\s*")(?P<version>[^"\r\n]*)"')
     literal("tests/host/Project/Sources/Methods/Smoke.4dm",
             r'\.value\.version\s*[#=]\s*"(?P<version>[^"\r\n]+)"', required=True)
     literal("README.md", r"^\|[^\n]*`" + re.escape(config["cli"])
