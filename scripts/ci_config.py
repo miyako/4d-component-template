@@ -21,6 +21,7 @@ from initialize import validate as validate_initialization
 
 ROOT = Path(__file__).resolve().parents[1]
 TARGETS = ("macos-x64", "macos-arm64", "windows-x64")
+TOOL4D_DOWNLOAD_HOSTS = {"resources-download.4d.com", "builds2.4d.com"}
 SEMVER = r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:0|[1-9]\d*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
 
 
@@ -211,6 +212,25 @@ def checked_tool_pin(url, digest):
     return url, digest.lower()
 
 
+def checked_download_url(url):
+    parsed = urllib.parse.urlsplit(url)
+    if (parsed.scheme != "https" or parsed.hostname not in TOOL4D_DOWNLOAD_HOSTS
+            or parsed.username or parsed.password or parsed.port not in (None, 443)):
+        raise ValueError("tool4D download redirected outside official HTTPS origin")
+    return url
+
+
+class Tool4DRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, request, response, code, message, headers, newurl):
+        checked_download_url(newurl)
+        return super().redirect_request(request, response, code, message, headers, newurl)
+
+
+def open_tool4d_url(url):
+    checked_download_url(url)
+    return urllib.request.build_opener(Tool4DRedirectHandler()).open(url, timeout=120)
+
+
 def download_tool4d(root=ROOT, *, url=None, digest=None):
     """Download a concrete, SHA-256-pinned HTTPS TAR.XZ or ZIP app archive."""
     root = Path(root).resolve()
@@ -224,10 +244,8 @@ def download_tool4d(root=ROOT, *, url=None, digest=None):
         raise ValueError("tool4D download destination must not be a symlink")
     sha = hashlib.sha256()
     try:
-        with urllib.request.urlopen(url, timeout=120) as response, archive.open("wb") as output:
-            redirected = urllib.parse.urlsplit(response.geturl())
-            if redirected.scheme != "https" or redirected.hostname != "resources-download.4d.com":
-                raise ValueError("tool4D download redirected outside official HTTPS origin")
+        with open_tool4d_url(url) as response, archive.open("wb") as output:
+            checked_download_url(response.geturl())
             while chunk := response.read(1024 * 1024):
                 sha.update(chunk)
                 output.write(chunk)

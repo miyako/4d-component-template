@@ -471,15 +471,15 @@ class DeliveryTests(unittest.TestCase):
             archive.writestr(info, data)
         return output.getvalue()
 
-    def download(self, data, digest=None):
+    def download(self, data, digest=None, final_url=None):
         response = io.BytesIO(data)
-        response.geturl = lambda: "https://resources-download.4d.com/fixed/tool4d.zip"
+        response.geturl = lambda: final_url or "https://resources-download.4d.com/fixed/tool4d.zip"
         environment = {
             "TOOL4D_URL": "https://resources-download.4d.com/fixed/tool4d.zip",
             "TOOL4D_SHA256": digest or hashlib.sha256(data).hexdigest(),
         }
         with patch.dict(os.environ, environment, clear=True), patch.object(
-                ci_config.urllib.request, "urlopen", return_value=response):
+                ci_config, "open_tool4d_url", return_value=response):
             return ci_config.download_tool4d(self.root)
 
     def test_verified_tool4d_download_and_permissions(self):
@@ -489,6 +489,35 @@ class DeliveryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "already exists"):
             self.download(self.archive_bytes("tool4d.app/Contents/MacOS/tool4d"))
         self.assertEqual(executable.read_bytes(), b"tool4d")
+
+    def test_official_vendor_cdn_redirect_keeps_pinned_hash_requirement(self):
+        data = self.archive_bytes("tool4d.app/Contents/MacOS/tool4d")
+        with self.assertRaisesRegex(ValueError, "SHA-256 mismatch"):
+            self.download(data, "0" * 64, "https://builds2.4d.com/fixed.tar.xz?Expires=123")
+        executable = self.download(data, final_url="https://builds2.4d.com/fixed.tar.xz?Expires=123")
+        self.assertEqual(executable.read_bytes(), b"tool4d")
+
+    def test_unapproved_or_non_https_vendor_redirect_fails_closed(self):
+        data = self.archive_bytes("tool4d.app/Contents/MacOS/tool4d")
+        for url in ("http://builds2.4d.com/tool", "https://untrusted.invalid/tool",
+                    "https://builds2.4d.com.untrusted.invalid/tool",
+                    "https://user@builds2.4d.com/tool", "https://builds2.4d.com:8443/tool"):
+            with self.subTest(url=url), self.assertRaisesRegex(ValueError, "official HTTPS"):
+                self.download(data, final_url=url)
+
+    def test_redirect_handler_rejects_every_unapproved_hop_before_following(self):
+        handler = ci_config.Tool4DRedirectHandler()
+        request = ci_config.urllib.request.Request("https://resources-download.4d.com/fixed/tool4d")
+        for url in ("http://builds2.4d.com/tool", "https://untrusted.invalid/tool",
+                    "https://user@builds2.4d.com/tool", "https://builds2.4d.com:8443/tool"):
+            with self.subTest(url=url), patch.object(
+                    ci_config.urllib.request.HTTPRedirectHandler, "redirect_request") as follow:
+                with self.assertRaisesRegex(ValueError, "official HTTPS"):
+                    handler.redirect_request(request, None, 302, "Found", {}, url)
+                follow.assert_not_called()
+        redirect = handler.redirect_request(request, None, 302, "Found", {},
+                                            "https://builds2.4d.com/fixed.tar.xz?Expires=123")
+        self.assertEqual(redirect.full_url, "https://builds2.4d.com/fixed.tar.xz?Expires=123")
 
     def test_tool4d_digest_and_unsafe_zip_rejected(self):
         with self.assertRaisesRegex(ValueError, "SHA-256 mismatch"):

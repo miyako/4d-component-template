@@ -177,8 +177,8 @@ UTF-8, exactly one JSON line, LF on both systems, protocol version 1:
 
 | Invocation | Status / stdout / stderr |
 | --- | --- |
-| `hello-cli greet --name "4D"` | 0 / `{"protocol":1,"message":"Hello, 4D!"}` + LF / empty |
-| `hello-cli --version` | 0 / `{"protocol":1,"version":"0.1.0"}` + LF / empty |
+| `component-cli greet --name "4D"` | 0 / `{"protocol":1,"message":"Hello, 4D!"}` + LF / empty |
+| `component-cli --version` | 0 / `{"protocol":1,"version":"0.1.0"}` + LF / empty |
 | Invalid/unknown/missing/duplicate args, empty or malformed UTF-8 name | 2 / empty / error JSON below + LF |
 
 ```json
@@ -297,8 +297,11 @@ approved public compiler pin is already in `package.json.tool`.
 | `TOOL4D_SHA256` | Optional paired override: `40a5d177a4f73165f52abf6ec8000249d81411c41353ccf258cece8e74639261`; verify the approved archive hash out of band |
 
 Supply URL/hash overrides together or neither; incomplete pairs fail.
-GitHub automatically supplies `GITHUB_TOKEN`, and only the publish job receives
-`contents: write`. Do not register it or a personal token as another secret.
+GitHub automatically supplies `GITHUB_TOKEN`; only Publish's version and
+publication jobs receive `contents: write`. Do not register it or a personal
+token as another secret. Repository rules must permit the workflow bot's
+non-force version commit to `main`; a protected-branch rejection stops Publish
+without bypassing those rules.
 None of these variables or the automatic token enables signing.
 
 Reference URL form:
@@ -310,6 +313,11 @@ locally, SHA256
 The pin is public versioned metadata in `package.json.tool`, not a credential.
 This archive is macOS ARM64 only, not a native Intel/Windows runtime.
 Local download checks native host compatibility plus safe extraction:
+The fixed vendor URL currently redirects to the official `builds2.4d.com`
+CDN. Every redirect is checked before following: only the exact vendor hosts
+over HTTPS/default TLS port, without URL credentials, are permitted. Expiring
+CDN query parameters are transport details, not user-configurable compiler pins;
+the archive must still match the approved SHA256 before extraction.
 
 ```sh
 python3 scripts/ci_config.py download-tool4d
@@ -344,13 +352,14 @@ Native Libraries and CompiledCode are required, not source-shaped substitutes.
 The compile marker binds inputs with `input_sha256` and generated
 DerivedData/Libraries with `output_sha256`, rejecting changed outputs at packaging.
 
-Align `template.json.version`, `package.json.version` and the CLI version,
-commit and push `v<version>`, e.g. `v0.1.0`. Release builds all CLI targets from
-that same tag, compiles after Resources assembly, packs `REPOSITORY.zip`,
+Publish synchronizes the configured component/CLI version and contracts,
+commits the version update to `main` and builds all CLI targets from that exact
+commit. It compiles after Resources assembly, packs `REPOSITORY.zip`,
 and **loads the unpacked compiled package in a real 4D host before publishing**.
 Uninitialized/misnamed projects, missing tool/binary/library, failed compile or
-failed host test fail closed. Only the publish job receives `contents:write`
-through built-in `GITHUB_TOKEN`; no personal token/version-bot commit needed.
+failed host test fail closed. Only after downloaded assets pass verification
+does it create `v<version>` and the GitHub release. Built-in `GITHUB_TOKEN`
+performs the version commit, tag and release; no personal token is needed.
 
 ```text
 REPOSITORY.zip
@@ -378,25 +387,74 @@ After this workflow version is merged to the **default branch**, open
 **Actions → CI → Run workflow** and choose a branch for validation.
 Hosted 4D remains opt-in through `FOURD_ENABLED`; a CLI-only green run does not
 prove compilation or host loading.
+When `FOURD_ENABLED=true`, an initialized branch/PR/manual CI run also builds
+the actual compiled component and tests its unpacked ZIP. Download
+**Artifacts → compiled-component** from the completed run: it contains
+`REPOSITORY.zip` and adjacent `REPOSITORY.acceptance.json`, retained for 30 days.
+The evidence binds the ZIP SHA256/size, source revision, all three native build
+manifests, actual tool4d identity and source/compiler/final compiled-host reports.
+**component-acceptance-diagnostics** retains completed stages or failure details;
+failed acceptance does not upload an accepted component. This inspection path
+creates neither a tag nor a GitHub release and uses no Apple credentials.
+Intel/Windows **4D**, installed-release downloads and signing remain separate
+checks; hosted native CLI execution is not native 4D execution.
 
-**Actions → Release compiled component → Run workflow** requires `version_tag`:
-an **existing** `v<SemVer>` tag matching the initialized component version.
-It does not create a tag. The gate resolves the tag to a commit SHA, then every
-native build, assembly, compilation and publication job uses that exact SHA,
-not the UI-selected branch. Version/repository/4D gates and final unpacked
-compiled-host acceptance are mandatory. Before publication the tag is refreshed
-and checked against that SHA, then `gh release create --verify-tag` is used.
+The same non-publishing stage can be invoked after restoring same-revision
+native binaries and `build-manifest.json` files under `build/<target>/`:
+
+```sh
+python3 scripts/accept_hosted.py --root . --repository OWNER/REPOSITORY \
+  --tool4d .tools/tool4d.app/Contents/MacOS/tool4d
+```
+
+It requires `execution:"passed"` in each verified native manifest, reassembles
+resources, source-tests, compiles, packs and compiled-host-tests before saving
+stable evidence. Cross-only manifests are not hosted native evidence.
+
+There are exactly two workflows: **CI** and **Publish**. Open
+**Actions → Publish → Run workflow**, select **main**, and choose **mode**:
+**patch** (default), **minor** or **major**. No tag needs to exist first.
+Publish uses the highest stable `vX.Y.Z` tag as its version base (not tag dates;
+prerelease tags are ignored). With no stable tag, it bumps the configured
+version: for `0.1.0`, patch gives `0.1.1`, minor `0.2.0`, major `1.0.0`.
+Malformed/inconsistent metadata or a proposed downgrade fails before committing.
+The generic version helper updates package/template metadata, selected-language
+version declarations, version contracts and current CLI/class documentation
+without rewriting unrelated dependency or historical versions.
+
+Publish serializes runs (`publish`, no cancellation), rejects non-main dispatches
+and existing tag/release collisions, commits version changes to `main`, and passes
+the resulting full commit SHA to reusable CI and every package/sign/publish job.
+CI runs on branch pushes, PRs and manual requests, not tag pushes; the bot's
+`GITHUB_TOKEN` commit does not trigger a recursive CI run. Publish calls CI
+explicitly and performs mandatory 4D acceptance separately, without duplicating
+CI's optional compiled-package inspection.
+Signing policy is read from the version commit. The optional
+**require_apple_signing** checkbox escalates an unsigned version to signed;
+leaving it unchecked never downgrades a policy-required signed version.
 Do not dispatch publication or create tags without approval. Merely opening
 this PR does not make the new **Run workflow** button available in the default
 template; the workflow file must first merge.
 
 ### Optional signing/notarization
 
-**Registering Apple secrets does not enable signing.** The current
-`.github/workflows/release.yml` creates an **unsigned** component and does not
-consume any of the seven secrets below. They are credentials for a future,
-explicitly implemented opt-in signing/notarization workflow, not prerequisites
-for the free local tool4d compiler or this unsigned release workflow.
+**Unsigned is the default; signing is implemented and opt-in.**
+`release-policy.json` has `schema:1` and an initially empty
+`apple_notarized_versions` array. To require signing for a component release,
+commit its exact next version (without `v`) before running Publish:
+
+```json
+{"schema":1,"apple_notarized_versions":["0.1.0"]}
+```
+
+The policy is independent of repository, namespace, CLI and selected language.
+Initialization preserves it. A missing policy or an unlisted version is
+unsigned; malformed policy fails closed. Alternatively, check
+**require_apple_signing** for a manual release dispatch. That flag can only
+escalate, never downgrade the version policy. The policy gate accesses no
+secrets and emits `apple_signing`; only its signed branch receives the seven
+credentials below. Unsigned CI/local acceptance and unsigned publication need
+none of them. Registering credentials alone does not change the policy.
 
 In the **newly generated repository**, register private credentials under
 **Settings → Secrets and variables → Actions → Secrets → New repository secret**.
@@ -419,22 +477,80 @@ Keep public build configuration separate under **Actions → Variables**:
 tool4d build and archive SHA256 are already pinned in `package.json.tool`;
 `TOOL4D_URL` and `TOOL4D_SHA256` are **optional paired overrides**, not required
 secrets. Supply both or neither; incomplete/invalid overrides fail.
-GitHub supplies `GITHUB_TOKEN` automatically; only the publish job grants it
-`contents: write`. Do not register a personal token for this workflow.
+GitHub supplies `GITHUB_TOKEN` automatically; only Publish's version and
+publication jobs grant it `contents: write`. Do not register a personal token
+for this workflow.
 
-Signing is **not required** by this unsigned build/release pipeline. PDF references
-sign macOS distributions; their release policy is not an intrinsic 4D requirement.
-Windows Authenticode and Apple notarization are not configured here.
+The implemented `scripts/sign_release.py` validates all credentials before
+signing and requires the checkout to equal the resolved release SHA. It
+reproduces the current unsigned ZIP from verified compilation inputs, then
+signs an **isolated distribution copy** of the universal CLI and native Mach-O
+Libraries with Developer ID, hardened runtime and timestamp verification.
+It never edits the compiler marker or signs the original compiler outputs.
+The helper signs a DMG, requires notarization JSON **Accepted**, staples and
+validates that DMG, mounts the final container and repacks the dependency-manager
+ZIP from its actual contents. Temporary keychain, certificate and owned mounts
+are cleaned on success or failure. Windows Authenticode is not implemented.
 
-For production, explicitly add opt-in signing before final package validation:
-certificate/password, ephemeral keychain password, identity and notarization
-credentials in Actions **secrets only**; minimum entitlements; fail each codesign
-error; require notarization JSON `Accepted`; clean temporary keychain in
-`always()`; retest the final signed package. Bare CLI executables cannot be
-stapled. Stapling a signed container and Apple's recommended `Contents/` component
-layout require deliberate packaging changes. Never `continue-on-error` signing.
-Gatekeeper/quarantine can block unsigned downloaded executables; no runtime
-trust bypass is supplied.
+The release stage source-tests, compiles, packages and tests the unsigned
+component before signing, then unpacks the **final ZIP** and requires actual
+compiled-host acceptance again. Both ZIP levels retain explicit nested
+directories, executable modes, source stripping and external Libraries;
+the `.4dbase` does not gain an application `Contents/` layout. The DMG is the
+notarized/stapled container; bare executables and the ZIP itself are not stapled.
+Signing timestamps/notarization are not bit-for-bit reproducibility promises.
+
+Accepted release artifacts contain `REPOSITORY.zip`,
+`REPOSITORY.acceptance.json`, and in signed mode `REPOSITORY.dmg` plus
+`REPOSITORY-signing.json`. The acceptance report binds all asset hashes/sizes,
+source revision, native manifests, compiler provenance, unsigned host and exact
+final compiled-host results. Publication verifies the downloaded artifact set
+again and refuses missing, modified, mixed-revision or unvalidated assets.
+Download the ZIP for Dependency manager/manual `.4dbase` installation, or mount
+the signed DMG for the same component payload. Preserve both evidence JSON files
+with the artifacts. Native Intel/Windows 4D, installed-release downloads and
+signing validation on other destinations remain separate observations.
+Gatekeeper/quarantine can block unsigned downloads; no runtime trust bypass or
+silent unsigned fallback is supplied.
+
+The signing implementation and its mocked vendor-tool regressions originate from
+MIT-licensed [miyako/UuidTest commit 7e0cfab](https://github.com/miyako/UuidTest/tree/7e0cfab983a582994e12c79c09aa47a205ea4bfc).
+Its [actual v0.1.0 release run](https://github.com/miyako/UuidTest/actions/runs/41270374443)
+executed signing, notarization, stapling and exact final ZIP host acceptance.
+The [public signing proof](https://github.com/miyako/UuidTest/releases/download/v0.1.0/UuidTest-signing.json)
+records `Accepted`; its original writer also verified public download hashes,
+strict signatures/stapling and actual downloaded ZIP host loading. This is
+evidence for that helper/revision/destination, not a claim that this uninitialized
+template or every adopter was signed or validated on every native platform.
+
+### Lifecycle checklist
+
+Create the destination with **Use this template**, initialize its exact name and
+one selected language, then replace the feature/API/docs/CLI and host contracts.
+Commit the feature, notices and pinned dependencies. Set the generated
+repository's **FOURD_ENABLED=true** variable; choose unsigned policy or commit
+a signed version and register its seven secrets. Run **CI → Run workflow** to
+inspect the compiled ZIP/evidence without publication. After approval, run
+**Publish → Run workflow** on **main**, selecting patch/minor/major and optional
+signing escalation. It bumps and commits the version, builds/tests that exact
+SHA, and creates the tag/release only after all required gates pass. Download
+the exact-name ZIP and evidence from the accepted GitHub release. Workflow
+buttons require the workflow to exist on the default branch. The uninitialized
+template itself remains nonreleasable.
+
+If builds fail after the version commit, that commit remains on main but no tag
+or release is created. A fresh Publish run with the same mode reuses that version
+when the previous stable tag still computes it; it does not fabricate build
+success or roll back user commits. Versions ahead of the computed candidate are
+rejected. If publication fails *after* pushing the accepted tag, it is retained:
+the workflow never deletes/replaces tags or overwrites an existing release.
+Inspect the retained evidence and resolve that publication failure explicitly.
+Main may advance during builds, but the accepted commit must still be in main's
+history before a new tag is created atomically through GitHub's refs API
+(including rejection of an identical-SHA collision). Downloaded assets are rechecked
+against accepted hashes/sizes, revision, native manifests, signing policy and
+full host contracts before any tag creation; `gh release create --verify-tag`
+then publishes only the literal validated asset list.
 
 ## Icons
 

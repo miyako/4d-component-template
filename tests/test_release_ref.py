@@ -20,7 +20,7 @@ class ReleaseRefTests(unittest.TestCase):
         self.root = ROOT / (".release-ref-test-" + uuid.uuid4().hex)
         self.root.mkdir()
         self.addCleanup(shutil.rmtree, self.root)
-        self.git("init", "-q")
+        self.git("init", "-q", "--initial-branch=main")
         self.git("config", "user.name", "Release fixture")
         self.git("config", "user.email", "release-fixture@example.invalid")
         self.git("commit", "-q", "--allow-empty", "-m", "first")
@@ -145,23 +145,156 @@ class ReleaseRefTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "template.json version"):
             ci_config.load_config(ROOT, tag="v999999.0.0")
 
-    def test_workflows_pin_every_post_gate_checkout_and_package_tag(self):
+    def test_only_ci_and_publish_with_main_only_version_and_exact_sha_builds(self):
         ci = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
-        release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        release = (ROOT / ".github/workflows/publish.yml").read_text(encoding="utf-8")
+        self.assertEqual(sorted(path.name for path in (ROOT / ".github/workflows").iterdir()),
+                         ["ci.yml", "publish.yml"])
+        self.assertTrue(ci.startswith("name: CI\n"))
+        self.assertTrue(release.startswith("name: Publish\n"))
+        self.assertIn("branches: ['**']", ci)
+        self.assertNotIn("  push:", release)
+        self.assertNotIn("version_tag:", release)
+        self.assertIn("options: [patch, minor, major]", release)
+        self.assertIn("default: patch", release)
+        self.assertIn("group: publish\n  cancel-in-progress: false", release)
+        self.assertIn("if: github.ref != 'refs/heads/main'", release)
+        self.assertIn("ref: main", release)
+        self.assertIn("bump_release.py apply", release)
+        self.assertIn("--stage", release)
+        self.assertIn("git push origin HEAD:refs/heads/main", release)
+        self.assertLess(release.index("release_ref.py available"), release.index("git commit"))
+        self.assertEqual(release.count("contents: write"), 2)
         self.assertEqual(ci.count("uses: actions/checkout@v4"), 3)
         self.assertEqual(ci.count("ref: ${{ inputs.source_sha || github.sha }}"), 3)
         self.assertEqual(ci.count("&& !inputs.release_call"), 4)
         self.assertIn("workflow_dispatch:", ci)
         self.assertIn("workflow_dispatch:", release)
         self.assertIn("fetch-depth: 0", release)
-        self.assertIn("source_sha: ${{ needs.gate.outputs.source_sha }}", release)
+        self.assertIn("source_sha: ${{ needs.version.outputs.source_sha }}", release)
         self.assertIn("release_call: true", release)
-        self.assertEqual(release.count("ref: ${{ needs.gate.outputs.source_sha }}"), 2)
+        self.assertEqual(release.count("ref: ${{ needs.version.outputs.source_sha }}"), 2)
         self.assertEqual(release.count('validate --release --tag "$RELEASE_TAG"'), 2)
-        self.assertIn('package_component.py --tag "$RELEASE_TAG" --unpack-test', release)
-        self.assertLess(release.index("release_ref.py verify"), release.index("gh release create"))
-        self.assertIn('git fetch --force --no-tags origin "+refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"', release)
-        self.assertIn("--verify-tag", release)
+        self.assertIn('--tool4d .tools/tool4d.app/Contents/MacOS/tool4d --tag "$RELEASE_TAG"', release)
+        self.assertIn("--create-tag --publish", release)
+        self.assertNotIn("git tag ", release)
+        self.assertIn("--verify-tag", (ROOT / "scripts/release_assets.py").read_text())
+
+    def test_main_guard_rejects_nonmanual_and_nonmain_runs(self):
+        release_ref.require_main({"GITHUB_EVENT_NAME": "workflow_dispatch", "GITHUB_REF": "refs/heads/main"})
+        for event, ref in (("push", "refs/heads/main"), ("workflow_dispatch", "refs/heads/feature"),
+                           ("workflow_dispatch", "refs/tags/v0.1.0"), ("", "")):
+            with self.subTest(event=event, ref=ref), self.assertRaisesRegex(ValueError, "on main"):
+                release_ref.require_main({"GITHUB_EVENT_NAME": event, "GITHUB_REF": ref})
+
+    def test_availability_requires_explicit_404_for_both_remote_resources(self):
+        missing = subprocess.CompletedProcess([], 1, "HTTP/2.0 404 Not Found\n\n{}", "")
+        with patch.object(release_ref, "load_config") as config, patch.object(
+                release_ref.subprocess, "run", return_value=missing) as run:
+            release_ref.available(self.root, "owner/Destination", "v0.1.0")
+            config.assert_called_once_with(self.root, initialized=True,
+                                           repository="owner/Destination", tag="v0.1.0")
+            self.assertEqual(run.call_count, 2)
+            self.assertEqual(run.call_args.args[0][-1],
+                             "repos/owner/Destination/releases/tags/v0.1.0")
+
+    def test_tag_release_collision_and_unknown_api_failures_stop(self):
+        for result in (
+                subprocess.CompletedProcess([], 0, "HTTP/2.0 200 OK\n\n{}", ""),
+                subprocess.CompletedProcess([], 1, "HTTP/2.0 403 Forbidden\n", "permission denied"),
+                subprocess.CompletedProcess([], 1, "", "network unavailable"),
+                subprocess.CompletedProcess([], 0, "", ""),
+                subprocess.CompletedProcess([], 0, "HTTP/2.0 404 Not Found\n", "")):
+            with self.subTest(result=result), patch.object(release_ref, "load_config"), patch.object(
+                    release_ref.subprocess, "run", return_value=result) as run:
+                with self.assertRaises(ValueError):
+                    release_ref.available(self.root, "owner/Destination", "v0.1.0")
+                self.assertEqual(run.call_count, 1)
+
+    def test_existing_release_without_tag_still_blocks_creation(self):
+        responses = [
+            subprocess.CompletedProcess([], 1, "HTTP/2.0 404 Not Found\n", ""),
+            subprocess.CompletedProcess([], 0, "HTTP/2.0 200 OK\n", "")]
+        with patch.object(release_ref, "load_config"), patch.object(
+                release_ref.subprocess, "run", side_effect=responses):
+            with self.assertRaisesRegex(ValueError, "already exists"):
+                release_ref.available(self.root, "owner/Destination", "v0.1.0")
+
+    def test_invalid_candidate_or_nonmain_dispatch_never_creates_tag(self):
+        env = {"GITHUB_EVENT_NAME": "workflow_dispatch", "GITHUB_REF": "refs/heads/main"}
+        with patch.dict(os.environ, env), patch.object(release_ref, "available") as available:
+            for revision in ("", "HEAD", self.sha[:7], None):
+                with self.subTest(revision=revision), self.assertRaisesRegex(ValueError, "normalized"):
+                    release_ref.create_tag(self.root, "owner/Destination", "v0.2.0", revision)
+            available.assert_not_called()
+        with patch.dict(os.environ, {**env, "GITHUB_REF": "refs/heads/feature"}), patch.object(
+                release_ref, "available") as available:
+            with self.assertRaisesRegex(ValueError, "on main"):
+                release_ref.create_tag(self.root, "owner/Destination", "v0.2.0", self.sha)
+            available.assert_not_called()
+
+    def test_remote_tag_mismatch_fails_before_success(self):
+        env = {"GITHUB_EVENT_NAME": "workflow_dispatch", "GITHUB_REF": "refs/heads/main"}
+        remote = subprocess.CompletedProcess([], 0, "b" * 40 + "\trefs/tags/v0.2.0\n", "")
+        with patch.dict(os.environ, env), patch.object(release_ref, "available"), patch.object(
+                release_ref.subprocess, "run", return_value=remote), patch.object(
+                release_ref, "verify") as verify:
+            with self.assertRaisesRegex(ValueError, "remote release tag"):
+                release_ref.create_tag(self.root, "owner/Destination", "v0.2.0", self.sha)
+            verify.assert_not_called()
+
+    def test_create_tag_requires_main_ancestry_and_atomic_creation_before_remote_verification(self):
+        env = {"GITHUB_EVENT_NAME": "workflow_dispatch", "GITHUB_REF": "refs/heads/main"}
+        remote = subprocess.CompletedProcess([], 0, self.sha + "\trefs/tags/v0.2.0\n", "")
+        with patch.dict(os.environ, env), patch.object(release_ref, "available") as available, patch.object(
+                release_ref.subprocess, "run", return_value=remote) as run, patch.object(
+                release_ref, "verify") as verify:
+            release_ref.create_tag(self.root, "owner/Destination", "v0.2.0", self.sha)
+        available.assert_called_once_with(self.root, "owner/Destination", "v0.2.0")
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertEqual(commands[1], ["git", "merge-base", "--is-ancestor", self.sha,
+                                       "refs/remotes/origin/main"])
+        self.assertEqual(commands[2], ["gh", "api", "--method", "POST",
+                                       "repos/owner/Destination/git/refs",
+                                       "-f", "ref=refs/tags/v0.2.0", "-f", "sha=" + self.sha])
+        self.assertEqual(commands[3], ["git", "fetch", "--no-tags", "origin",
+                                       "refs/tags/v0.2.0:refs/tags/v0.2.0"])
+        verify.assert_called_once_with(self.root, "v0.2.0", self.sha)
+
+    def test_creation_stops_if_main_no_longer_contains_candidate_or_tag_collides(self):
+        env = {"GITHUB_EVENT_NAME": "workflow_dispatch", "GITHUB_REF": "refs/heads/main"}
+        for fail_index in (1, 2):
+            responses = [subprocess.CompletedProcess([], 0, "", "")] * fail_index + [
+                subprocess.CalledProcessError(1, ["git"])]
+            with self.subTest(fail_index=fail_index), patch.dict(os.environ, env), patch.object(
+                    release_ref, "available"), patch.object(
+                    release_ref.subprocess, "run", side_effect=responses) as run:
+                with self.assertRaises(subprocess.CalledProcessError):
+                    release_ref.create_tag(self.root, "owner/Destination", "v0.2.0", self.sha)
+                self.assertEqual(run.call_count, fail_index + 1)
+
+    def test_real_git_tag_points_at_accepted_commit_even_if_main_advances(self):
+        remote = self.root / "fixture-origin.git"
+        self.git("init", "-q", "--bare", str(remote))
+        self.git("remote", "add", "origin", str(remote))
+        self.git("commit", "-q", "--allow-empty", "-m", "main advanced")
+        self.git("push", "-q", "origin", "HEAD:refs/heads/main")
+        self.git("checkout", "-q", "--detach", self.sha)
+        env = {"GITHUB_EVENT_NAME": "workflow_dispatch", "GITHUB_REF": "refs/heads/main"}
+        run = subprocess.run
+
+        def fake_api(arguments, **kwargs):
+            if arguments[0] == "gh":
+                return run(["git", "--git-dir", str(remote), "update-ref",
+                            "refs/tags/v0.2.0", self.sha, "0" * 40], **kwargs)
+            return run(arguments, **kwargs)
+
+        with patch.dict(os.environ, env), patch.object(release_ref, "available"), patch.object(
+                release_ref.subprocess, "run", side_effect=fake_api):
+            release_ref.create_tag(self.root, "owner/Destination", "v0.2.0", self.sha)
+        self.assertEqual(self.git("ls-remote", "origin", "refs/tags/v0.2.0"),
+                         self.sha + "\trefs/tags/v0.2.0")
+        self.assertNotEqual(self.git("rev-parse", "origin/main"), self.sha)
 
 
 if __name__ == "__main__":

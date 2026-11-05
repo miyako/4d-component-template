@@ -22,7 +22,7 @@ class InitializerTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         for name in ("component", "cli-starters", "tests/host"):
             shutil.copytree(ROOT / name, self.root / name)
-        for name in ("template.json", "package.json", "README.md"):
+        for name in ("template.json", "package.json", "README.md", "release-policy.json"):
             shutil.copy2(ROOT / name, self.root / name)
 
     def configure(self, language="go", **changes):
@@ -42,6 +42,8 @@ class InitializerTests(unittest.TestCase):
                 initializer.initialize(destination, "hello-tools", "AcmeHello", "hello-cli", language, "Greeting")
                 config = json.loads((destination / "template.json").read_text())
                 self.assertEqual(config["language"], language)
+                self.assertEqual((destination / "release-policy.json").read_bytes(),
+                                 (self.root / "release-policy.json").read_bytes())
                 self.assertTrue(config["initialized"])
                 component = destination / "component" / "hello-tools"
                 self.assertTrue((component / "Project" / "hello-tools.4DProject").is_file())
@@ -77,6 +79,13 @@ class InitializerTests(unittest.TestCase):
         self.assertEqual(files, {p.relative_to(self.root): p.read_bytes() for p in self.root.rglob("*") if p.is_file()})
         with self.assertRaisesRegex(ValueError, "already initialized"):
             self.configure(namespace="AnotherNamespace")
+
+    def test_initialization_preserves_independent_version_signing_policy(self):
+        policy = self.root / "release-policy.json"
+        content = '{"schema":1,"apple_notarized_versions":["0.1.0"]}\n'
+        policy.write_text(content)
+        self.configure()
+        self.assertEqual(policy.read_text(), content)
 
     def test_invalid_inputs_do_not_mutate(self):
         cases = [

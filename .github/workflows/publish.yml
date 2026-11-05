@@ -1,0 +1,199 @@
+name: Publish
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Semantic version increment
+        required: true
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+      require_apple_signing:
+        description: Require Apple signing even when the version policy is unsigned
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+jobs:
+  version:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    outputs:
+      source_sha: ${{ steps.commit.outputs.sha }}
+      release_tag: ${{ steps.version.outputs.tag }}
+      apple_signing: ${{ steps.signing_policy.outputs.apple_signing }}
+    steps:
+      - name: Require manual publication from main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "Publish must be run on main." >&2
+          exit 1
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compute next version from the latest stable release tag
+        id: version
+        env:
+          MODE: ${{ inputs.mode }}
+        run: python scripts/bump_release.py next --mode "$MODE"
+      - name: Synchronize version metadata and stage only validated version changes
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: python scripts/bump_release.py apply --version "$VERSION" --stage
+      - name: Require initialized matching repository, version and explicit 4D opt-in
+        env:
+          FOURD_ENABLED: ${{ vars.FOURD_ENABLED }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: python scripts/ci_config.py validate --release --tag "$RELEASE_TAG"
+      - name: Reject existing release tags or GitHub releases before committing
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: python scripts/release_ref.py available --repository "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG"
+      - name: Resolve version signing policy without accessing secrets
+        id: signing_policy
+        env:
+          REQUIRE_APPLE_SIGNING: ${{ inputs.require_apple_signing }}
+        shell: python
+        run: |
+          import os, subprocess, sys
+          arguments = [sys.executable, "scripts/sign_release.py", "policy", "--root", "."]
+          if os.environ["REQUIRE_APPLE_SIGNING"] == "true":
+              arguments.append("--require-apple-signing")
+          subprocess.run(arguments, check=True)
+      - name: Commit version updates to main and record the exact build SHA
+        id: commit
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if ! git diff --cached --quiet; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit -m "Release $VERSION"
+            git push origin HEAD:refs/heads/main
+          fi
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  native:
+    needs: version
+    uses: ./.github/workflows/ci.yml
+    with:
+      source_sha: ${{ needs.version.outputs.source_sha }}
+      release_call: true
+
+  compile:
+    needs: [version, native]
+    runs-on: macos-15
+    env:
+      FOURD_ENABLED: ${{ vars.FOURD_ENABLED }}
+      TOOL4D_URL: ${{ vars.TOOL4D_URL }}
+      TOOL4D_SHA256: ${{ vars.TOOL4D_SHA256 }}
+      RELEASE_TAG: ${{ needs.version.outputs.release_tag }}
+      RELEASE_SHA: ${{ needs.version.outputs.source_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.source_sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python scripts/ci_config.py validate --release --tag "$RELEASE_TAG"
+      - uses: actions/download-artifact@v4
+        with:
+          name: cli-macos-x64
+          path: build/macos-x64
+      - uses: actions/download-artifact@v4
+        with:
+          name: cli-macos-arm64
+          path: build/macos-arm64
+      - uses: actions/download-artifact@v4
+        with:
+          name: cli-windows-x64
+          path: build/windows-x64
+      - name: Download SHA-256-verified tool4D
+        run: python scripts/ci_config.py download-tool4d
+      - name: Build and accept unsigned component without Apple secrets
+        if: needs.version.outputs.apple_signing == 'false'
+        run: >-
+          python scripts/accept_hosted.py --repository "$GITHUB_REPOSITORY"
+          --tool4d .tools/tool4d.app/Contents/MacOS/tool4d --tag "$RELEASE_TAG"
+      - name: Sign, notarize, staple and accept the exact final ZIP
+        if: needs.version.outputs.apple_signing == 'true'
+        env:
+          APPLE_DEVELOPER_ID_CERTIFICATE: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE }}
+          APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          NOTARYTOOL_APPLE_ID: ${{ secrets.NOTARYTOOL_APPLE_ID }}
+          NOTARYTOOL_TEAM_ID: ${{ secrets.NOTARYTOOL_TEAM_ID }}
+          NOTARYTOOL_PASSWORD: ${{ secrets.NOTARYTOOL_PASSWORD }}
+          CODESIGN_APPLE_ID: ${{ secrets.CODESIGN_APPLE_ID }}
+        run: >-
+          python scripts/accept_hosted.py --repository "$GITHUB_REPOSITORY"
+          --tool4d .tools/tool4d.app/Contents/MacOS/tool4d --tag "$RELEASE_TAG"
+          --require-apple-signing
+      - uses: actions/upload-artifact@v4
+        with:
+          name: compiled-release
+          path: |
+            dist/*.zip
+            dist/*.dmg
+            dist/*-signing.json
+            dist/*.acceptance.json
+          if-no-files-found: error
+          retention-days: 7
+      - name: Retain source, compiler and final-host diagnostics even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-acceptance-diagnostics
+          path: |
+            build/hosted-acceptance.json
+            build/source-host-status.json
+            build/compile-status.json
+            build/unsigned-compiled-host-status.json
+            build/compiled-host-status.json
+            build/host-status.json
+          if-no-files-found: warn
+          retention-days: 30
+
+  publish:
+    needs: [version, compile]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.source_sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: compiled-release
+          path: dist
+      - name: Create the tag and release only after final asset validation
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.version.outputs.release_tag }}
+          RELEASE_SHA: ${{ needs.version.outputs.source_sha }}
+          APPLE_SIGNING: ${{ needs.version.outputs.apple_signing }}
+        run: |
+          signing=()
+          if [ "$APPLE_SIGNING" = "true" ]; then signing+=(--require-apple-signing); fi
+          python scripts/release_assets.py --repository "$GH_REPO" --tag "$RELEASE_TAG" \
+            --sha "$RELEASE_SHA" "${signing[@]}" --create-tag --publish
