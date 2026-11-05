@@ -79,11 +79,30 @@ or packaging; do not turn an SDK requirement into a component resource.
    the ZIP from the final mounted DMG and reruns exact final ZIP compiled-host
    acceptance. Missing credentials or signing errors never downgrade to unsigned.
    Keep exactly CI and Publish workflows. Manual Publish on main accepts
-   patch/minor/major (default patch), bumps from the highest stable tag (or the
-   configured version when none exists), synchronizes version metadata/contracts/
+   patch/minor/major (default patch), bumps from the highest stable prefix-free
+   `X.Y.Z` tag (also reading legacy `vX.Y.Z` tags only as migration baselines, or
+   the configured version when none exists), synchronizes version metadata/contracts/
    docs and commits to main. Build/test that exact SHA through reusable CI.
    Downloaded asset/hash/host-evidence and collision checks precede new tag/release
    creation. Do not precreate tags or enable tag-push publication.
+
+## Component release versions and tags
+
+New component release tags must equal the prefix-free SemVer version:
+`0.1.0`, never `v0.1.0`. Publish emits stable `X.Y.Z`; package validation,
+signing proofs and publication reject a `v` prefix. Do not rename/delete/move
+published history or automatically alias old tags/releases; legacy stable tags
+are read only to avoid downgrades. New builds need fresh acceptance evidence
+and unchanged exact-version signing policy gates. Upstream Actions/toolchain
+tags and historical external URLs are not component-tag rewrite targets.
+
+The official [Follow 4D version guide](https://blog.4d.com/follow-4d-version-a-smarter-way-to-manage-your-dependencies/)
+requires **host-version-aligned** LTS `x.y.p` (e.g. `20.2.3`) or R-release
+`xRy.p` (e.g. `20R3.2`) tags. Ordinary component SemVer `0.1.0` does not enable
+Follow4D matching or prove host compatibility. This template does not implement
+non-SemVer R-tag publication; do not invent support or select that dependency
+rule without a deliberate host-aligned distribution contract. The resolver
+uses the tag, not a custom release display title. See AGENTS.md for migration.
 
 ## Discovery is supported, invocation is not guaranteed
 

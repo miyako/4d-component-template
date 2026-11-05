@@ -307,7 +307,7 @@ def prepare_payload(root, scratch, config, unsigned):
     marker["project"] = "component/" + config["repository"] + "/Project/" + config["repository"] + ".4DProject"
     (mirror / "build/compile-status.json").write_text(json.dumps(marker), encoding="utf-8")
     expected = package_component.package(
-        mirror, repository="owner/" + config["repository"], tag="v" + config["version"])
+        mirror, repository="owner/" + config["repository"], tag=config["version"])
     if expected.read_bytes() != unsigned.read_bytes():
         raise SigningError("unsigned ZIP does not match freshly compiled package inputs")
     unpacked = package_component.unpack_for_test(mirror, unsigned)

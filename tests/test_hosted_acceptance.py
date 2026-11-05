@@ -10,6 +10,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 import accept_hosted
+import accept_local
 from build_provenance import record
 import test_delivery
 
@@ -34,7 +35,7 @@ class HostedAcceptanceTests(unittest.TestCase):
         self.host_calls.append(component is not None)
         return {"success": True, "finished": True, "compiled": component is not None}
 
-    def accept(self, signed=False, subprocess_run=None):
+    def accept(self, signed=False, subprocess_run=None, tag="0.1.0"):
         with patch.object(accept_hosted, "require_tool4d_host"), patch.object(
                 accept_hosted, "assemble"), patch.object(
                 accept_hosted, "compile_component", return_value=self.fixture.status), patch.object(
@@ -43,7 +44,34 @@ class HostedAcceptanceTests(unittest.TestCase):
                 return_value=subprocess.CompletedProcess([], 0, "tool4d 20.7 101905\n", "")), patch(
                 "build_provenance.commit", return_value=None), patch.object(
                 accept_hosted, "commit", return_value="a" * 40 if signed else None):
-            return accept_hosted.accept(self.root, "owner/example-component", self.tool, "v0.1.0", signed)
+            return accept_hosted.accept(self.root, "owner/example-component", self.tool, tag, signed)
+
+    def test_default_package_tag_is_the_prefix_free_configured_version(self):
+        report = self.accept(tag=None)
+        self.assertTrue(report["finished"])
+        self.assertEqual(report["steps"]["package"]["status"], "passed")
+        self.assertEqual(self.host_calls, [False, True])
+
+    def test_local_orchestrator_packages_with_prefix_free_version(self):
+        with patch.object(accept_local, "doctor", return_value={}), patch.object(
+                accept_local, "require_tool4d_host"), patch.object(
+                accept_local, "native_target", return_value="macos-arm64"), patch.object(
+                accept_local, "build"), patch.object(accept_local, "assemble"), patch.object(
+                accept_local, "compile_component", return_value=self.fixture.status), patch.object(
+                accept_local, "test_4d", side_effect=self.host), patch.object(
+                accept_local.subprocess, "run",
+                return_value=subprocess.CompletedProcess([], 0, "synthetic tool4d identity\n", "")):
+            report = accept_local.accept(self.root, "owner/example-component", self.tool)
+        self.assertTrue(report["finished"])
+        self.assertEqual(report["steps"]["package"]["status"], "passed")
+        self.assertEqual(self.host_calls, [False, True])
+        self.assertFalse(report["release_ready"])
+
+    def test_prefixed_tag_is_rejected_before_host_or_package_acceptance(self):
+        with self.assertRaisesRegex(ValueError, "without a v prefix"):
+            self.accept(tag="v0.1.0")
+        self.assertEqual(self.host_calls, [])
+        self.assertFalse((self.root / "dist/example-component.acceptance.json").exists())
 
     def test_accepted_zip_has_embedded_native_and_both_host_reports(self):
         report = self.accept()
@@ -127,7 +155,7 @@ class HostedAcceptanceTests(unittest.TestCase):
                 unsigned = json.loads((self.root / "build/hosted-acceptance.json").read_text())[
                     "unsigned_artifact"]
                 proof = {
-                    "schema": 1, "version": "0.1.0", "sourceSHA": "a" * 40, "releaseTag": "v0.1.0",
+                    "schema": 1, "version": "0.1.0", "sourceSHA": "a" * 40, "releaseTag": "0.1.0",
                     "unsignedCompileInputSHA256": self.fixture.status["input_sha256"],
                     "unsignedZIPHashSHA256": unsigned["sha256"],
                     "hostValidation": "required-after-signing",

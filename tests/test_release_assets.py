@@ -53,7 +53,7 @@ class ReleaseAssetsTests(unittest.TestCase):
     def verify(self, signed=False):
         with patch.object(release_assets, "commit", return_value=self.revision):
             return release_assets.verify_assets(
-                self.root, "owner/example-component", "v0.1.0", self.revision, signed)
+                self.root, "owner/example-component", "0.1.0", self.revision, signed)
 
     def test_unsigned_exact_bytes_and_complete_contract_pass_without_secrets(self):
         with patch.dict("os.environ", {}, clear=True):
@@ -139,7 +139,7 @@ class ReleaseAssetsTests(unittest.TestCase):
         dmg = self.root / "dist" / (name + ".dmg")
         dmg.write_bytes(b"synthetic DMG, not Apple evidence")
         proof = {
-            "schema": 1, "version": "0.1.0", "sourceSHA": self.revision, "releaseTag": "v0.1.0",
+            "schema": 1, "version": "0.1.0", "sourceSHA": self.revision, "releaseTag": "0.1.0",
             "unsignedCompileInputSHA256": self.fixture.status["input_sha256"],
             "unsignedZIPHashSHA256": "0" * 64, "hostValidation": "required-after-signing",
             "notarization": {"status": "Accepted", "submissionUUID": "12345678-1234-4321-8765-123456789abc"},
@@ -187,14 +187,34 @@ class ReleaseAssetsTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "verified CLI"):
             self.verify(signed=True)
 
+    def test_legacy_prefixed_signing_proof_cannot_approve_new_release(self):
+        signing, proof = self.signed_assets()
+        proof["releaseTag"] = "v0.1.0"
+        signing.write_text(json.dumps(proof))
+        self.report["steps"]["signing_proof"]["details"] = proof
+        self.report["assets"][-1].update(
+            sha256=release_assets.sha256(signing), bytes=signing.stat().st_size)
+        self.save()
+        with self.assertRaisesRegex(ValueError, "release provenance"):
+            self.verify(signed=True)
+
+    def test_prefixed_publication_never_creates_tag_or_release(self):
+        with patch.object(release_assets, "create_release_tag") as tag, patch.object(
+                release_assets.subprocess, "run") as run:
+            with self.assertRaisesRegex(ValueError, "without a v prefix"):
+                release_assets.publish(self.root, "owner/example-component", "v0.1.0",
+                                       self.revision, create_tag=True)
+            tag.assert_not_called()
+            run.assert_not_called()
+
     def test_gh_receives_only_verified_literal_assets_and_existing_tag(self):
         with patch.object(release_assets, "commit", return_value=self.revision), patch.object(
                 release_assets, "verify_tag") as tag, patch.object(
                 release_assets.subprocess, "run") as run:
-            release_assets.publish(self.root, "owner/example-component", "v0.1.0", self.revision)
-        tag.assert_called_once_with(self.root, "v0.1.0", self.revision)
+            release_assets.publish(self.root, "owner/example-component", "0.1.0", self.revision)
+        tag.assert_called_once_with(self.root, "0.1.0", self.revision)
         arguments = run.call_args.args[0]
-        self.assertEqual(arguments[:4], ["gh", "release", "create", "v0.1.0"])
+        self.assertEqual(arguments[:4], ["gh", "release", "create", "0.1.0"])
         self.assertIn("--verify-tag", arguments)
         self.assertIn(str(self.evidence), arguments)
         self.assertNotIn("shell", run.call_args.kwargs)
@@ -221,7 +241,7 @@ class ReleaseAssetsTests(unittest.TestCase):
                 self.evidence]), patch.object(
                 release_assets, "create_release_tag", side_effect=lambda *args: order.append("tag")), patch.object(
                 release_assets.subprocess, "run", side_effect=lambda *args, **kwargs: order.append("release")):
-            release_assets.publish(self.root, "owner/example-component", "v0.1.0",
+            release_assets.publish(self.root, "owner/example-component", "0.1.0",
                                    self.revision, create_tag=True)
         self.assertEqual(order, ["assets", "tag", "release"])
 
@@ -230,7 +250,7 @@ class ReleaseAssetsTests(unittest.TestCase):
                 release_assets, "create_release_tag") as tag, patch.object(
                 release_assets.subprocess, "run") as run:
             with self.assertRaisesRegex(ValueError, "asset mismatch"):
-                release_assets.publish(self.root, "owner/example-component", "v0.1.0",
+                release_assets.publish(self.root, "owner/example-component", "0.1.0",
                                        self.revision, create_tag=True)
             tag.assert_not_called()
             run.assert_not_called()
@@ -238,7 +258,7 @@ class ReleaseAssetsTests(unittest.TestCase):
                 release_assets, "create_release_tag", side_effect=ValueError("collision")), patch.object(
                 release_assets.subprocess, "run") as run:
             with self.assertRaisesRegex(ValueError, "collision"):
-                release_assets.publish(self.root, "owner/example-component", "v0.1.0",
+                release_assets.publish(self.root, "owner/example-component", "0.1.0",
                                        self.revision, create_tag=True)
             run.assert_not_called()
 

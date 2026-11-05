@@ -238,7 +238,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=ROOT)
     parser.add_argument("--repository", help="actual owner/name; defaults to GITHUB_REPOSITORY")
-    parser.add_argument("--tag", help="release v<SemVer>; defaults to GITHUB_REF_NAME")
+    parser.add_argument("--tag", help="prefix-free SemVer release tag, e.g. 0.1.0; defaults to GITHUB_REF_NAME")
     parser.add_argument("--language", choices=("go", "rust", "cpp"))
     parser.add_argument("--unpack-test", action="store_true",
                         help="also unpack the generated archive under build/release-test")

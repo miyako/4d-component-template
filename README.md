@@ -206,7 +206,7 @@ Alternatively declare in the host's `Project/Sources/dependencies.json`:
 {
   "version": 2100,
   "dependencies": {
-    "hello-tools": {"github": "OWNER/hello-tools", "tag": "v0.1.0"}
+    "hello-tools": {"github": "OWNER/hello-tools", "tag": "0.1.0"}
   }
 }
 ```
@@ -216,6 +216,29 @@ Reload the host and use your namespace. Manual installation: unzip and copy
 Local source dependencies point at the component package root, not the anchor.
 `tests/host/environment4d.json` documents this mapping; automated runtime checks
 install an isolated copy under `Components/` to test actual component loading.
+
+### Release versions and Dependency Manager tags
+
+Use **prefix-free component versions and tags**: `0.1.0`, not `v0.1.0`.
+The version in `template.json`/`package.json`, new release tag and signing proof
+must agree exactly. Publish generates stable `X.Y.Z` tags; a GitHub release
+display title cannot repair a prefixed or otherwise incompatible tag.
+
+The official [Follow 4D version guide](https://blog.4d.com/follow-4d-version-a-smarter-way-to-manage-your-dependencies/)
+describes a separate **host-version-aligned** rule: LTS tags `x.y.p` (e.g.
+`20.2.3` for 4D 20.2) and R-release tags `xRy.p` (e.g. `20R3.2`).
+An ordinary component release `0.1.0` does **not** imply Follow4D matching or
+host compatibility; select an ordinary tag/version rule instead.
+This SemVer pipeline does not implement R-release tag publication and rejects
+`20R3.2`. Host-aligned distribution requires an explicit versioning/compatibility
+contract, not just removing `v` or changing the release title.
+
+Existing published `vX.Y.Z` tags/releases are left intact. The planner reads
+legacy stable tags alongside prefix-free stable tags to avoid version
+downgrades, but emits only prefix-free new tags for newly accepted builds.
+There is no automatic aliasing, retagging or reuse of old acceptance/signing
+proofs. Consumers pinned to old tags must be migrated explicitly. Upstream
+Actions versions and historical external release links are unchanged.
 
 ## Build, validate and release
 
@@ -339,7 +362,7 @@ No imagined setup action or unpinned external compiler is used.
 python3 scripts/test_4d.py --tool4d /path/to/tool4d
 python3 scripts/compile_component.py --tool4d /path/to/tool4d
 python3 scripts/package_component.py --repository OWNER/REPOSITORY \
-  --tag v0.1.0 --unpack-test
+  --tag 0.1.0 --unpack-test
 python3 scripts/test_4d.py --tool4d /path/to/tool4d \
   --component build/release-test/REPOSITORY.4dbase
 ```
@@ -358,7 +381,7 @@ commit. It compiles after Resources assembly, packs `REPOSITORY.zip`,
 and **loads the unpacked compiled package in a real 4D host before publishing**.
 Uninitialized/misnamed projects, missing tool/binary/library, failed compile or
 failed host test fail closed. Only after downloaded assets pass verification
-does it create `v<version>` and the GitHub release. Built-in `GITHUB_TOKEN`
+does it create the prefix-free `<version>` tag and the GitHub release. Built-in `GITHUB_TOKEN`
 performs the version commit, tag and release; no personal token is needed.
 
 ```text
@@ -414,8 +437,9 @@ stable evidence. Cross-only manifests are not hosted native evidence.
 There are exactly two workflows: **CI** and **Publish**. Open
 **Actions → Publish → Run workflow**, select **main**, and choose **mode**:
 **patch** (default), **minor** or **major**. No tag needs to exist first.
-Publish uses the highest stable `vX.Y.Z` tag as its version base (not tag dates;
-prerelease tags are ignored). With no stable tag, it bumps the configured
+Publish uses the highest stable `X.Y.Z` tag as its version base, also reading
+legacy `vX.Y.Z` tags only as migration baselines (not tag dates; prerelease and
+build-metadata tags are ignored). With no stable tag, it bumps the configured
 version: for `0.1.0`, patch gives `0.1.1`, minor `0.2.0`, major `1.0.0`.
 Malformed/inconsistent metadata or a proposed downgrade fails before committing.
 The generic version helper updates package/template metadata, selected-language

@@ -68,6 +68,35 @@ produce `cs.AcmeHello.Greeting` in a host; component-internal code uses
 the namespace shares component classes. Underscore names are internal
 **by convention**, not access control.
 
+### Component release tags: no `v` prefix
+
+Component versions and new release tags must be identical prefix-free SemVer:
+`0.1.0`, **not** `v0.1.0`. Publish emits stable `X.Y.Z`; package validation,
+signing proofs and publication reject prefixed tags rather than stripping them.
+This is the template's Dependency Manager release convention, not a rule for
+upstream GitHub Actions/toolchain tags or historical external release URLs.
+The resolver consumes the **tag**, not the GitHub release display title.
+
+The official [Follow 4D version reference](https://blog.4d.com/follow-4d-version-a-smarter-way-to-manage-your-dependencies/)
+specifies prefix-free, **host-version-aligned** tags: LTS `x.y.p`, e.g.
+`20.2.3` for the 4D 20.2 line, and R releases `xRy.p`, e.g. `20R3.2`.
+Ordinary component SemVer such as `0.1.0` does **not** activate or imply
+Follow4D compatibility. Host-aligned distribution is a separate deliberate
+versioning choice; this pipeline does not implement non-SemVer R-release tags
+and rejects them. Do not select Follow 4D version for ordinary component
+versions or infer compatibility from a tag alone. A custom display title does
+not excuse an incompatible tag format.
+
+Migration is read-only for published history: version planning considers the
+highest numeric stable version across both `X.Y.Z` and legacy `vX.Y.Z` tags,
+ignoring prerelease/build-metadata and unrelated tags. With no stable tag it
+bumps the configured version. It emits only a new prefix-free tag at the newly
+accepted version commit; do not rename, move, delete or automatically alias old
+tags/releases, or reuse their acceptance/signing evidence. Existing consumers
+pinned to old tags stay unchanged until explicitly migrated. Signing policy
+entries remain exact prefix-free versions; the policy is not rewritten or
+weakened during migration.
+
 ### Scope and stop rules
 
 * If a requested design requires a host-installed 4D plug-in, stop CLI-component
@@ -446,7 +475,7 @@ Run the actual stages (example version `0.1.0`, initialized destination only):
 python3 scripts/test_4d.py --root . --tool4d .tools/tool4d.app/Contents/MacOS/tool4d
 python3 scripts/compile_component.py --root . --tool4d .tools/tool4d.app/Contents/MacOS/tool4d
 python3 scripts/package_component.py --root . --repository OWNER/REPOSITORY \
-  --tag v0.1.0 --unpack-test
+  --tag 0.1.0 --unpack-test
 python3 scripts/test_4d.py --root . --tool4d .tools/tool4d.app/Contents/MacOS/tool4d \
   --component build/release-test/REPOSITORY.4dbase
 ```
@@ -546,8 +575,9 @@ inspection path is unsigned; release signing uses the explicit
 Keep exactly `.github/workflows/ci.yml` (**CI**) and `publish.yml` (**Publish**).
 **Actions → Publish → Run workflow** accepts **mode** patch/minor/major, default
 patch, and requires **main**. It does not accept or require an existing tag.
-`bump_release.py next --mode MODE` uses the highest stable `vX.Y.Z` tag, ignoring
-prereleases, or the configured version if no stable tag exists; it bumps that
+`bump_release.py next --mode MODE` uses the highest stable `X.Y.Z` tag (including
+legacy `vX.Y.Z` history only as a migration baseline), ignoring prereleases and
+build metadata, or the configured version if no stable tag exists; it bumps that
 base (initial `0.1.0` becomes `0.1.1` with patch). Validate synchronized metadata
 and reject downgrades before writes. `apply --version X.Y.Z --stage` updates
 only the validated configured version surfaces: package/template,
@@ -569,7 +599,7 @@ Only after compilation and exact final-host success does `release_assets.py`
 verify downloaded ZIP/DMG/proof bytes, accepted hashes/sizes, revision, native
 manifests and full source/final-host contracts. It then verifies main ancestry,
 checks remote tag/release collisions again, atomically creates a new
-`vX.Y.Z` tag at the accepted SHA and invokes `gh release create --verify-tag`
+prefix-free `X.Y.Z` tag at the accepted SHA and invokes `gh release create --verify-tag`
 with a literal validated asset list. GitHub's create-ref API rejects collisions
 even at the same SHA; no force/update/delete operation is used.
 No automatic tag-push release trigger exists.
