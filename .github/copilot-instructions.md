@@ -30,4 +30,8 @@ the exact version-commit SHA and downloaded accepted asset hashes before
 creating the version tag and release. Keep exactly CI and manual main-only
 Publish workflows; Publish bumps patch/minor/major and commits synchronized
 metadata before building. Never initialize or publish the original template.
+Component release tags must equal the prefix-free SemVer version (`0.1.0`,
+never `v0.1.0`); legacy prefixed tags are read-only migration baselines.
+Follow4D host-aligned LTS/R tags are a distinct convention, not implied by
+ordinary component SemVer; see AGENTS.md and its official reference.
 Unsigned local acceptance needs no license activation or signing secrets.

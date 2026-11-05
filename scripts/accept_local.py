@@ -93,7 +93,7 @@ def accept(root, repository, tool4d, cross=False):
         source = step("source_host", lambda: test_4d(root, tool4d))
         (output.parent / "source-host-status.json").write_text(json.dumps(source, indent=2) + "\n")
         step("compile", lambda: compile_component(root, tool4d))
-        archive = step("package", lambda: package(root, repository=repository, tag="v" + config["version"]))
+        archive = step("package", lambda: package(root, repository=repository, tag=config["version"]))
         report["artifact"] = {"path": str(archive), "sha256": sha256(archive), "bytes": archive.stat().st_size}
         unpacked = unpack_for_test(root, archive)
         compiled = step("compiled_host", lambda: test_4d(root, tool4d, unpacked))

@@ -148,7 +148,7 @@ class SigningTests(unittest.TestCase):
         self.policy = self.root / "release-policy.json"
         self.policy.write_text('{"schema":1,"apple_notarized_versions":["0.1.0"]}')
         self.unsigned = package_component.package(
-            self.root, repository="miyako/UuidTest", tag="v0.1.0")
+            self.root, repository="miyako/UuidTest", tag="0.1.0")
         self.original_zip = self.unsigned.read_bytes()
         self.source_snapshot = signing.snapshot(component)
         self.env = {
@@ -158,7 +158,7 @@ class SigningTests(unittest.TestCase):
         self.env["APPLE_DEVELOPER_ID_CERTIFICATE"] = base64.b64encode(
             b"synthetic not-a-real-p12").decode()
         self.env.update(GITHUB_ACTIONS="true", GITHUB_REPOSITORY="miyako/UuidTest",
-                        GITHUB_REF_NAME="v0.1.0", GITHUB_SHA="a" * 40)
+                        GITHUB_REF_NAME="0.1.0", GITHUB_SHA="a" * 40)
         self.secrets = {name: self.env[name] for name in signing.SECRET_NAMES}
         self.tools = FakeTools(self.secrets)
 
@@ -198,6 +198,7 @@ class SigningTests(unittest.TestCase):
                        '{"schema":1,"apple_notarized_versions":"0.1.0"}',
                        '{"schema":1,"apple_notarized_versions":[null]}',
                        '{"schema":1,"apple_notarized_versions":["01.1.0"]}',
+                       '{"schema":1,"apple_notarized_versions":["v0.1.0"]}',
                        '{"schema":1,"apple_notarized_versions":["0.1.0","0.1.0"]}',
                        '{"schema":1,"apple_notarized_versions":[],"extra":1}'):
             self.policy.write_text(policy)
@@ -223,14 +224,14 @@ class SigningTests(unittest.TestCase):
 
     def test_manual_release_identity_overrides_workflow_branch_and_checks_head(self):
         self.env.update(GITHUB_REF_NAME="main", GITHUB_SHA="b" * 40,
-                        RELEASE_TAG="v0.1.0", RELEASE_SHA="a" * 40)
+                        RELEASE_TAG="0.1.0", RELEASE_SHA="a" * 40)
         proof = self.sign(require_apple_signing=True)
         self.assertEqual(proof["sourceSHA"], "a" * 40)
-        self.assertEqual(proof["releaseTag"], "v0.1.0")
+        self.assertEqual(proof["releaseTag"], "0.1.0")
         self.assertEqual(self.tools.calls[0], [signing.GIT, "rev-parse", "HEAD"])
 
     def test_resolved_source_commit_mismatch_fails_before_keychain_use(self):
-        self.env.update(RELEASE_TAG="v0.1.0", RELEASE_SHA="b" * 40)
+        self.env.update(RELEASE_TAG="0.1.0", RELEASE_SHA="b" * 40)
         with self.assertRaisesRegex(ValueError, "source HEAD does not match"):
             self.sign(require_apple_signing=True)
         self.assertEqual(self.tools.calls, [[signing.GIT, "rev-parse", "HEAD"]])
@@ -251,6 +252,7 @@ class SigningTests(unittest.TestCase):
                                  ({"GITHUB_REPOSITORY": ""}, "actual"),
                                  ({"GITHUB_REPOSITORY": "miyako/Wrong"}, "actual repository"),
                                  ({"GITHUB_REF_NAME": "main"}, "release tag"),
+                                 ({"GITHUB_REF_NAME": "v0.1.0"}, "release tag"),
                                  ({"GITHUB_SHA": ""}, "source commit")):
             with self.subTest(updates=updates), patch.dict(self.env, updates), \
                     self.assertRaisesRegex(ValueError, message):

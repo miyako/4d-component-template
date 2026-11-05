@@ -11,8 +11,9 @@ from ci_config import ROOT, SEMVER, load_config
 
 
 def validate_tag(tag):
-    if not isinstance(tag, str) or not re.fullmatch("v" + SEMVER, tag, flags=re.ASCII):
-        raise ValueError("release tag must be v<SemVer>, not a branch or arbitrary ref")
+    if not isinstance(tag, str) or not re.fullmatch(SEMVER, tag, flags=re.ASCII):
+        raise ValueError("release tag must be prefix-free SemVer (for example 0.1.0), "
+                         "not v-prefixed or an arbitrary ref")
     return tag
 
 

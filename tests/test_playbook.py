@@ -43,6 +43,16 @@ class PlaybookTests(unittest.TestCase):
         self.assertIn("* text=auto eol=lf", attributes)
         self.assertIn("*.png binary", attributes)
 
+    def test_release_guides_distinguish_prefix_free_semver_from_follow4d(self):
+        reference = "https://blog.4d.com/follow-4d-version-a-smarter-way-to-manage-your-dependencies/"
+        for source in (ROOT / "AGENTS.md", ROOT / "README.md", SKILL):
+            text = source.read_text(encoding="utf-8")
+            with self.subTest(source=source.relative_to(ROOT)):
+                for required in ("prefix-free", "v0.1.0", "20.2.3", "20R3.2", reference):
+                    self.assertIn(required, text)
+                self.assertNotIn("--tag v0.1.0", text)
+        self.assertIn('"tag": "0.1.0"', (ROOT / "README.md").read_text())
+
 
 if __name__ == "__main__":
     unittest.main()

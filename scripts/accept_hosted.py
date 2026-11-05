@@ -69,7 +69,7 @@ def accept(root, repository, tool4d, tag=None, require_apple_signing=False):
         (output.parent / "source-host-status.json").write_text(json.dumps(source, indent=2) + "\n")
         step("compile", lambda: compile_component(root, tool))
         archive = step("package", lambda: package(
-            root, repository=repository, tag=tag or "v" + config["version"]))
+            root, repository=repository, tag=tag or config["version"]))
         assets = [archive]
         if require_apple_signing:
             unsigned_hash = sha256(archive)
@@ -134,7 +134,7 @@ def main():
     parser.add_argument("--root", type=Path, default=ROOT)
     parser.add_argument("--repository", required=True)
     parser.add_argument("--tool4d", type=Path, required=True)
-    parser.add_argument("--tag", help="explicit version tag; no tag is created or published")
+    parser.add_argument("--tag", help="prefix-free SemVer version tag; no tag is created or published")
     parser.add_argument("--require-apple-signing", action="store_true",
                         help="require the Apple signing helper before exact final ZIP host acceptance")
     args = parser.parse_args()

@@ -20,7 +20,7 @@ def verify_signing_proof(root, config, revision, compile_input, unsigned_hash, a
     prefix = "dist/" + config["repository"]
     if (not isinstance(proof, dict) or type(proof.get("schema")) is not int or proof["schema"] != 1
             or proof.get("version") != config["version"] or proof.get("sourceSHA") != revision
-            or proof.get("releaseTag") != "v" + config["version"]
+            or proof.get("releaseTag") != config["version"]
             or proof.get("unsignedCompileInputSHA256") != compile_input
             or proof.get("unsignedZIPHashSHA256") != unsigned_hash
             or proof.get("hostValidation") != "required-after-signing"):

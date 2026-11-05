@@ -7,6 +7,9 @@ changed_paths as a single-line JSON array of repository-relative paths; callers
 can pass that array to ``git add --`` without staging unrelated work. This helper
 can stage those exact paths with ``apply --stage``. It does not commit, create
 tags, fetch, publish, or change signing policy.
+
+New tags equal the version without a v prefix. Legacy vX.Y.Z tags are read only
+as stable version baselines during migration; published history is never changed.
 """
 import argparse
 import json
@@ -252,8 +255,8 @@ def next_version(root, mode, repository=None, *, tags=None):
         tags = result.stdout.splitlines()
     if not isinstance(tags, (list, tuple)) or not all(isinstance(tag, str) for tag in tags):
         raise ValueError("tags must be a list of tag names")
-    releases = [stable(tag[1:]) for tag in tags
-                if re.fullmatch("v" + STABLE, tag)]
+    releases = [stable(tag.removeprefix("v")) for tag in tags
+                if re.fullmatch("v?" + STABLE, tag)]
     base = max(releases) if releases else stable(config["version"])
     major, minor, patch = base
     value = {"patch": (major, minor, patch + 1), "minor": (major, minor + 1, 0),
@@ -261,7 +264,7 @@ def next_version(root, mode, repository=None, *, tags=None):
     if stable(config["version"]) > value:
         raise ValueError("configured version is ahead of the next stable release; refusing a downgrade")
     version = ".".join(map(str, value))
-    return {"version": version, "tag": "v" + version}
+    return {"version": version, "tag": version}
 
 
 def apply(root, version, repository=None, *, stage=False):
@@ -272,7 +275,7 @@ def apply(root, version, repository=None, *, stage=False):
     if stage and updates:
         subprocess.run(["git", "add", "--", *sorted(updates)], cwd=root, check=True,
                        capture_output=True, text=True, encoding="utf-8")
-    return {"version": version, "tag": "v" + version, "changed_paths": sorted(updates)}
+    return {"version": version, "tag": version, "changed_paths": sorted(updates)}
 
 
 def main():
