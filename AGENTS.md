@@ -20,6 +20,7 @@ the destination identity or the user's language.
 
 | Decision | Required answer / check |
 | --- | --- |
+| Architecture | CLI-backed component using this template, or a separate native 4D plug-in installed in the host; no component-over-plug-in hybrid as a self-contained component solution |
 | Destination | Exact GitHub `owner/name`, including basename **case**; inspect the actual remote, not the checkout/worktree directory |
 | Language | One user-selected `go`, `rust` or `cpp`; never ship three implementations |
 | Namespace | Independent, unique 4D identifier; syntax validation cannot prove uniqueness among a host's future components |
@@ -27,6 +28,29 @@ the destination identity or the user's language.
 | Feature | API class/methods, input/output, versioned CLI protocol, errors, limits, timeout and concurrency semantics |
 | Dependencies | Pins, lockfiles, upstream licenses and redistribution notices, including statically linked runtime/stdlib |
 | Acceptance | Native platforms available now; real source/compiled host checks; local unsigned artifact versus approved publication |
+
+### Architecture and deployment boundary
+
+Choose **either** of these architectures before initialization:
+
+| Architecture | Execution and deployment |
+| --- | --- |
+| CLI-backed 4D component (this template) | Host code calls component classes; the component launches its bundled native CLI as a separate process through `4D.SystemWorker`. Install the component through the Dependency manager or the host's `Components/` folder; the CLI ships in component `Resources/bin/`. |
+| Native 4D plug-in (separate architecture) | Native code integrates through the 4D plug-in SDK. The plug-in must be installed in the host using 4D's supported plug-in installation mechanism; it is not privately loaded or deployed by a component. |
+
+This template must not generate or propose a component abstraction over plug-in
+commands as a self-contained component solution. If the feature requires native
+4D SDK integration, choose a separate **host-installed plug-in** architecture
+and explicitly document host installation, compatibility and dependencies.
+Native libraries used by a standalone CLI are not thereby 4D plug-ins.
+
+Calling or wrapping commands from an already host-installed plug-in does not
+change that deployment boundary: the plug-in remains an explicit host dependency.
+This rule does not make a blanket claim about which host code can call plug-in
+commands. A component cannot privately load/deploy a 4D plug-in, and component
+packaging cannot hide, eliminate or satisfy the host plug-in installation
+requirement. Do not put a plug-in in component Resources or Libraries and describe
+it as a private native backend.
 
 ### Identity is exact, namespace is independent
 
@@ -46,6 +70,9 @@ the namespace shares component classes. Underscore names are internal
 
 ### Scope and stop rules
 
+* If a requested design requires a host-installed 4D plug-in, stop CLI-component
+  adoption and select the separate plug-in architecture; do not disguise that
+  host dependency behind component classes or a component ZIP.
 * Do not initialize `miyako/4d-component-template` itself, even when a worktree
   has a different local name. Template maintenance/documentation is not adoption.
 * Never set `initialized` by hand, bypass initializer validation, overwrite a
@@ -374,6 +401,11 @@ reports. Copy that pair to durable storage before disposing of a worktree.
 proof that a pre-existing ZIP was produced by a failed attempt.
 
 ## 6. Free fixed tool4d and real compiled-package acceptance
+
+This pipeline packages the CLI-backed component, not a host-installed plug-in.
+Compiler-generated component `Libraries/` and bundled CLI resources are not a
+private plug-in backend. Neither the component ZIP nor Dependency manager
+installation satisfies a 4D plug-in's separate host installation requirement.
 
 [tool4d](https://developer.4d.com/docs/20/Admin/cli#tool4d) is the official free
 standalone headless tool. Do not bundle it in component Resources. This local
