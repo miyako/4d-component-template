@@ -88,6 +88,23 @@ images/Xcode/MSVC, so compiler patch versions are not immutable.
 
 ## Architecture and exposed API
 
+### Choose the architecture, not a hybrid
+
+| Choice | Execution and installation |
+| --- | --- |
+| **CLI-backed component: this template** | Host code calls component classes, which launch a bundled native CLI in a separate process through `4D.SystemWorker`. Install the component via the Dependency manager or `Components/`; its executable ships in `Resources/bin/`. |
+| **Native 4D plug-in: separate architecture** | Native code integrates through the 4D plug-in SDK. Install the plug-in in the host using 4D's supported plug-in installation mechanism, not inside a component. |
+
+If native 4D SDK integration is required, choose the separate host-installed
+plug-in architecture and make its host installation and compatibility requirements
+explicit. Do not generate or recommend a component-over-plug-in hybrid as a
+self-contained component solution. A component cannot privately load or deploy
+a 4D plug-in; wrapping plug-in commands cannot hide, eliminate or satisfy the
+host plug-in installation requirement. This is a deployment boundary, not a
+blanket restriction on host code calling commands from an installed plug-in:
+such a plug-in remains an explicit host dependency.
+See the canonical [architecture-selection rules](AGENTS.md#architecture-and-deployment-boundary).
+
 ```text
 template.json                         initialization/release identity
 cli/                                  one selected language implementation
@@ -176,6 +193,10 @@ and 4D macOS parsing require real native round-trip checks, not shell tests.
 Add an explicit Blob mode if your future feature returns binary output.
 
 ## Install after release
+
+These instructions install the **CLI-backed component and its bundled executable**,
+not a native 4D plug-in. Component packaging and Dependency manager installation
+do not install a plug-in in the host or satisfy that separate requirement.
 
 In the host's Dependency manager add **GitHub** dependency `OWNER/REPOSITORY`
 and choose the released tag/version. The asset must be exactly `REPOSITORY.zip`.
@@ -347,6 +368,9 @@ Packed `.4DZ` excludes `.4dm` Classes/Methods source. ZIP order/timestamps/modes
 are deterministic; serviced native compiler outputs need not be bit-identical.
 Explicit nested directory ZIP records are required: omitting them caused a real
 tool4d compiled-component loader crash, despite producing a generally valid ZIP.
+`Libraries/` here contains compiler-generated component support, not a private
+4D plug-in backend. Bundling CLI dependencies does not authorize component-private
+plug-in loading or replace host plug-in installation.
 
 ### Run workflows manually
 
@@ -467,7 +491,9 @@ Conventions were verified from
 (MIT, 2022 Keisuke Miyako). No feature algorithms, binaries or artwork were copied.
 [4d-plugin-tutorial](https://github.com/miyako/4d-plugin-tutorial) inspired the
 agent-driven tutorial UX; this is a component/standalone CLI, not its native
-plug-in SDK/code. Official references:
+plug-in SDK/code. That tutorial is a separate host-installed plug-in architecture,
+not guidance for adding a private plug-in backend to this component.
+Official references:
 [dependency naming](https://developer.4d.com/docs/Project/components),
 [Compile project](https://developer.4d.com/docs/commands/compile-project),
 [SystemWorker](https://developer.4d.com/docs/API/SystemWorkerClass) and

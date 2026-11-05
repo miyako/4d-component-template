@@ -1,6 +1,6 @@
 ---
 name: 4d-cli-component
-description: WHEN TO USE - create or adapt a real 4D component wrapping a Go, Rust or C++ CLI from this template; initialize an exact destination repository; change a feature class or namespace; replace Greeting with a feature API; diagnose SystemWorker quoting and errors; compile locally with free pinned tool4d; run source and compiled host tests; or package and assess release readiness.
+description: WHEN TO USE - select the CLI-backed component versus host-installed native 4D plug-in architecture; create or adapt a real 4D component wrapping a Go, Rust or C++ CLI from this template; initialize an exact destination repository; change a feature class or namespace; replace Greeting with a feature API; diagnose SystemWorker quoting and errors; compile locally with free pinned tool4d; run source and compiled host tests; or package and assess release readiness.
 ---
 
 # 4D CLI component adoption and acceptance
@@ -10,7 +10,28 @@ THINK/ASK → RUN playbook, including stop rules and the dated UUID case study.
 Then read `README.md`, `template.json`, class documentation and relevant
 scripts/tests. Resolve all paths below from the repository root, not this folder.
 
-1. **THINK / ASK:** establish exact case-sensitive GitHub identity, one
+## Architecture gate: CLI-backed component or host-installed plug-in
+
+This template supports a component facade over a **bundled native CLI executable**
+running as a separate process through `4D.SystemWorker`. Install the component
+through the Dependency manager or the host's `Components/` folder; the CLI ships
+in `Resources/bin/`. If native 4D SDK integration is required, choose a **separate
+native 4D plug-in architecture**, with the plug-in installed in the host and its
+installation/compatibility requirements explicit.
+
+Never generate or propose a component-over-plug-in hybrid as a self-contained
+component solution. A component cannot privately load or deploy a 4D plug-in;
+component packaging cannot hide, eliminate or satisfy host plug-in installation.
+Wrapping commands from an already installed plug-in leaves an explicit host
+dependency; this is not a blanket claim about whether host code can call those
+commands. Component compiler `Libraries/` and standalone CLI libraries are not
+a private 4D plug-in backend. Follow AGENTS.md's architecture gate before adoption
+or packaging; do not turn an SDK requirement into a component resource.
+
+## Adoption and acceptance sequence
+
+1. **THINK / ASK:** select the architecture above, then establish exact
+   case-sensitive GitHub identity, one
    user-selected language, independent unique namespace, CLI basename, feature
    API/protocol/error/limits, licenses and acceptance scope. Never initialize the
    original template repository or guess material missing decisions.

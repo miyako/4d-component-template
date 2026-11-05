@@ -4,6 +4,10 @@
 executable resolver. The host can technically access `cs.TemplateCLI._CLI`;
 underscore naming is not true private access in 4D.
 
+This resolves a standalone CLI for separate-process execution, not a native
+4D plug-in. A plug-in must be installed in the host; this resolver and component
+packaging cannot privately load/deploy it or satisfy that installation requirement.
+
 `execute(arguments : Collection) : Object` selects `/RESOURCES/bin/macOS/<name>`
 or `/RESOURCES/bin/Windows/<name>.exe`, checks existence, expands the virtual
 File to a physical path using `File(file.platformPath; fk platform path)`, then

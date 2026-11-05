@@ -1,5 +1,10 @@
 # _Process (internal convention)
 
+This adapter launches a standalone executable through `4D.SystemWorker`; it is
+not a native 4D plug-in loader. Features requiring native 4D SDK integration
+belong to the separate host-installed plug-in architecture, not a private
+component backend.
+
 `cs._Process.new().execute(file : 4D.File; arguments : Collection) : Object`
 is the generic synchronous process adapter. Arguments must be Text, File or
 Folder. File/Folder values are expanded to physical POSIX paths on macOS or
