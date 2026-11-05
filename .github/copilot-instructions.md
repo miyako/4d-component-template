@@ -18,5 +18,8 @@ Follow AGENTS.md for fixed free tool4d, licensing, packaging and optional signin
 Version signing policy defaults to unsigned; signed opt-in uses the implemented
 isolated signing/notarized-DMG path and must retest the exact final ZIP.
 Manual CI retains compiled ZIP/evidence without publication; releases verify
-the existing tag SHA and downloaded accepted asset hashes before publishing.
+the exact version-commit SHA and downloaded accepted asset hashes before
+creating the version tag and release. Keep exactly CI and manual main-only
+Publish workflows; Publish bumps patch/minor/major and commits synchronized
+metadata before building. Never initialize or publish the original template.
 Unsigned local acceptance needs no license activation or signing secrets.

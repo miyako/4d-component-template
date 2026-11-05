@@ -52,7 +52,12 @@ scripts/tests. Resolve all paths below from the repository root, not this folder
    the seven secrets, signs an isolated copy, notarizes/staples its DMG, repacks
    the ZIP from the final mounted DMG and reruns exact final ZIP compiled-host
    acceptance. Missing credentials or signing errors never downgrade to unsigned.
-   Existing-tag SHA and downloaded asset/hash/host-evidence gates precede publication.
+   Keep exactly CI and Publish workflows. Manual Publish on main accepts
+   patch/minor/major (default patch), bumps from the highest stable tag (or the
+   configured version when none exists), synchronizes version metadata/contracts/
+   docs and commits to main. Build/test that exact SHA through reusable CI.
+   Downloaded asset/hash/host-evidence and collision checks precede new tag/release
+   creation. Do not precreate tags or enable tag-push publication.
 
 ## Discovery is supported, invocation is not guaranteed
 

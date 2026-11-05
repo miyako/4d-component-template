@@ -201,7 +201,7 @@ class ReleaseAssetsTests(unittest.TestCase):
         self.assertNotIn("*.zip", arguments)
 
     def test_release_secret_gate_and_manual_escalation_are_explicit(self):
-        workflow = (ROOT / ".github/workflows/release.yml").read_text()
+        workflow = (ROOT / ".github/workflows/publish.yml").read_text()
         unsigned = workflow.split("name: Build and accept unsigned component without Apple secrets")[1].split(
             "name: Sign, notarize, staple")[0]
         self.assertIn("apple_signing == 'false'", unsigned)
@@ -214,6 +214,33 @@ class ReleaseAssetsTests(unittest.TestCase):
         self.assertIn("require_apple_signing:", workflow)
         self.assertIn("scripts/release_assets.py", workflow)
         self.assertNotIn("continue-on-error", workflow)
+
+    def test_new_tag_is_created_only_after_assets_pass_and_before_release(self):
+        order = []
+        with patch.object(release_assets, "verify_assets", side_effect=lambda *args: order.append("assets") or [
+                self.evidence]), patch.object(
+                release_assets, "create_release_tag", side_effect=lambda *args: order.append("tag")), patch.object(
+                release_assets.subprocess, "run", side_effect=lambda *args, **kwargs: order.append("release")):
+            release_assets.publish(self.root, "owner/example-component", "v0.1.0",
+                                   self.revision, create_tag=True)
+        self.assertEqual(order, ["assets", "tag", "release"])
+
+    def test_invalid_assets_or_tag_collision_never_create_release(self):
+        with patch.object(release_assets, "verify_assets", side_effect=ValueError("asset mismatch")), patch.object(
+                release_assets, "create_release_tag") as tag, patch.object(
+                release_assets.subprocess, "run") as run:
+            with self.assertRaisesRegex(ValueError, "asset mismatch"):
+                release_assets.publish(self.root, "owner/example-component", "v0.1.0",
+                                       self.revision, create_tag=True)
+            tag.assert_not_called()
+            run.assert_not_called()
+        with patch.object(release_assets, "verify_assets", return_value=[self.evidence]), patch.object(
+                release_assets, "create_release_tag", side_effect=ValueError("collision")), patch.object(
+                release_assets.subprocess, "run") as run:
+            with self.assertRaisesRegex(ValueError, "collision"):
+                release_assets.publish(self.root, "owner/example-component", "v0.1.0",
+                                       self.revision, create_tag=True)
+            run.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify downloaded accepted assets and optionally publish an existing immutable tag."""
+"""Verify downloaded accepted assets before creating a release tag and publication."""
 import argparse
 from pathlib import Path
 import re
@@ -7,7 +7,7 @@ import subprocess
 
 from build_provenance import commit, sha256, source_digest
 from ci_config import ROOT, TARGETS, load_config
-from release_ref import verify as verify_tag
+from release_ref import create_tag as create_release_tag, verify as verify_tag
 from sign_release import release_policy, submission_uuid
 from test_4d import _read_json, validate_status
 
@@ -139,9 +139,12 @@ def verify_assets(root, repository, tag, revision, apple_signing=False):
     return [*paths, evidence]
 
 
-def publish(root, repository, tag, revision, apple_signing=False):
-    verify_tag(root, tag, revision)
+def publish(root, repository, tag, revision, apple_signing=False, *, create_tag=False):
     assets = verify_assets(root, repository, tag, revision, apple_signing)
+    if create_tag:
+        create_release_tag(root, repository, tag, revision)
+    else:
+        verify_tag(root, tag, revision)
     notes = (
         "Compiled component with universal macOS and x64 Windows CLI resources. "
         "Class/method source is excluded; the exact final ZIP passed compiled-host acceptance. "
@@ -163,11 +166,16 @@ def main():
     parser.add_argument("--sha", required=True)
     parser.add_argument("--require-apple-signing", action="store_true")
     parser.add_argument("--publish", action="store_true",
-                        help="publish verified assets to the already existing tag; default only verifies")
+                        help="publish verified assets; default only verifies without creating tags/releases")
+    parser.add_argument("--create-tag", action="store_true",
+                        help="create a new main-only version tag after asset verification; requires --publish")
     args = parser.parse_args()
     try:
+        if args.create_tag and not args.publish:
+            raise ValueError("--create-tag requires --publish")
         if args.publish:
-            publish(args.root, args.repository, args.tag, args.sha, args.require_apple_signing)
+            publish(args.root, args.repository, args.tag, args.sha, args.require_apple_signing,
+                    create_tag=args.create_tag)
         else:
             for asset in verify_assets(args.root, args.repository, args.tag, args.sha,
                                        args.require_apple_signing):

@@ -2,11 +2,11 @@
 """Fail-closed Apple signing of a compiled release, notarized through a DMG.
 
 `policy` is secret-free and platform independent; absent policy means unsigned.
-`sign` requires macOS GitHub Actions, a matching release tag, and all seven
+`sign` requires macOS GitHub Actions, a matching candidate version, and all seven
 credentials. It never signs the source component or treats a .4dbase as an app.
 Both commands accept --require-apple-signing, which can only upgrade policy.
-RELEASE_TAG/RELEASE_SHA override the workflow ref/SHA for manual tag releases;
-the checked-out HEAD must equal the resolved release commit.
+RELEASE_TAG/RELEASE_SHA identify the future tag and exact version commit;
+the checked-out HEAD must equal that commit before any tag is created.
 The resulting ZIP is copied from the accepted, stapled, mounted DMG; the ZIP
 itself cannot be stapled. The caller must still run the real compiled host test.
 """
