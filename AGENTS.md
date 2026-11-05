@@ -480,6 +480,18 @@ It uses/restores a local handler; it is not a permanent host-global component
 handler. Inspect `build/host-status.json` before guessing that compilation,
 namespace sharing or quoting is broken.
 
+**Every 4D project opened headlessly must already contain
+`Project/Sources/dependencies.json` before its first open.** Otherwise 4D may
+show a modal "import components" dialog that blocks a `--startup-method` run
+indefinitely until a person dismisses it (observed with 4D 21.0 on Windows for
+a compiler project lacking the file, miyako/DisplayScale#2). This applies to the
+component, the host fixture, `tooling/compiler/` and any new tooling/test
+project you add. Use `{"version":2100,"dependencies":{}}` for a project with no
+components; the host fixture declares the component, e.g.
+`{"version":2100,"dependencies":{"NAME":{}}}`. Commit the file with the project;
+do not create it after the first open or dismiss the dialog manually. A hung
+headless 4D run on a project lacking it is this dialog, not a compile failure.
+
 For template maintainers, this opt-in regression creates a disposable initialized
 `UuidTest` / `UuidTest` / `uuid-test` Go fixture, renames the class to `Identifier`,
 then executes the same local pipeline:

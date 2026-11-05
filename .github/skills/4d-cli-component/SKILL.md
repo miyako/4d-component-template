@@ -62,6 +62,11 @@ or packaging; do not turn an SDK requirement into a component resource.
    Without `--cross`, all three current artifacts/manifests are still needed.
    For Rust/C++, restore binaries plus `build-manifest.json` from same-commit
    native CI into `build/<target>/`; never mix stale or changed inputs/outputs.
+   Every 4D project opened headlessly (component, host fixture,
+   `tooling/compiler/`, any added project) must ship
+   `Project/Sources/dependencies.json` **before its first open**, e.g.
+   `{"version":2100,"dependencies":{}}`; otherwise 4D can show a modal
+   "import components" dialog that hangs `--startup-method` runs (see AGENTS.md).
 7. **Report:** identify exact revision/platform/tools, commands, artifact/evidence
    paths, `passed` / `failed` / `not_run` per check and blockers. Partial local success
    is **NOT release ready**. Do not publish or add credentials without approval.
