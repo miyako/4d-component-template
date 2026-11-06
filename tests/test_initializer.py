@@ -87,6 +87,25 @@ class InitializerTests(unittest.TestCase):
         self.configure()
         self.assertEqual(policy.read_text(), content)
 
+    def test_initialization_preserves_credential_helper_and_canonical_links(self):
+        helper = self.root / "scripts/set-release-secrets.sh"
+        helper.parent.mkdir()
+        shutil.copy2(ROOT / "scripts/set-release-secrets.sh", helper)
+        for name in ("AGENTS.md", ".github/skills/4d-cli-component/SKILL.md"):
+            target = self.root / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(ROOT / name, target)
+        before = {path: path.read_bytes() for path in (
+            helper, self.root / "AGENTS.md",
+            self.root / ".github/skills/4d-cli-component/SKILL.md",
+        )}
+        self.configure()
+        for path, content in before.items():
+            self.assertEqual(path.read_bytes(), content)
+        readme = (self.root / "README.md").read_text()
+        self.assertIn("(scripts/set-release-secrets.sh)", readme)
+        self.assertIn("(AGENTS.md#user-owned-credential-setup-and-reuse)", readme)
+
     def test_invalid_inputs_do_not_mutate(self):
         cases = [
             {"repository": "../escape"}, {"repository": "owner/name"}, {"repository": "name.with.dot"},

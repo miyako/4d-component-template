@@ -1,6 +1,6 @@
 ---
 name: 4d-cli-component
-description: WHEN TO USE - select the CLI-backed component versus host-installed native 4D plug-in architecture; create or adapt a real 4D component wrapping a Go, Rust or C++ CLI from this template; initialize an exact destination repository; change a feature class or namespace; replace Greeting with a feature API; diagnose SystemWorker quoting and errors; compile locally with free pinned tool4d; run source and compiled host tests; or package and assess release readiness.
+description: WHEN TO USE - select the CLI-backed component versus host-installed native 4D plug-in architecture; create or adapt a real 4D component wrapping a Go, Rust or C++ CLI from this template; initialize an exact destination repository; change a feature class or namespace; replace Greeting with a feature API; diagnose SystemWorker quoting and errors; compile locally with free pinned tool4d; run source and compiled host tests; guide user-owned optional signing credential setup; or package and assess release readiness.
 ---
 
 # 4D CLI component adoption and acceptance
@@ -85,6 +85,20 @@ or packaging; do not turn an SDK requirement into a component resource.
    docs and commits to main. Build/test that exact SHA through reusable CI.
    Downloaded asset/hash/host-evidence and collision checks precede new tag/release
    creation. Do not precreate tags or enable tag-push publication.
+
+## Optional credential setup
+
+For optional signed-release credential setup, follow the canonical
+[user-owned setup and reuse guide](../../../AGENTS.md#user-owned-credential-setup-and-reuse).
+Inspect the actual destination workflow first: unsigned/Windows-only workflows
+may need no Apple secrets. The bundled
+[scripts/set-release-secrets.sh](../../../scripts/set-release-secrets.sh)
+is **user-run only** and sets six common secrets; this template's signed Publish
+also requires the separately user-set `CODESIGN_APPLE_ID` identity/fingerprint,
+not email. Agents must not execute the helper or real Keychain/secret operations,
+read values, choose certificates or ask for secrets in chat; only
+`gh secret list --repo OWNER/REPOSITORY` names/timestamps may be inspected.
+Setup never authorizes publication or changes the unsigned-default policy.
 
 ## Component release versions and tags
 

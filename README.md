@@ -480,6 +480,14 @@ secrets and emits `apple_signing`; only its signed branch receives the seven
 credentials below. Unsigned CI/local acceptance and unsigned publication need
 none of them. Registering credentials alone does not change the policy.
 
+Follow the canonical [user-owned credential setup and reuse guide](AGENTS.md#user-owned-credential-setup-and-reuse)
+before configuring signed releases. It includes the bundled
+[user-run helper](scripts/set-release-secrets.sh), reuse of the existing macOS
+login Keychain service, first-time setup/replacement and troubleshooting.
+The helper uploads six common secrets; this signed workflow also needs the
+user's separately configured `CODESIGN_APPLE_ID`. Agents never execute the helper
+or read/set credential values. Secret setup does not authorize publication.
+
 In the **newly generated repository**, register private credentials under
 **Settings → Secrets and variables → Actions → Secrets → New repository secret**.
 GitHub's **Use this template does not inherit secrets or repository variables**.
