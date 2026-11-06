@@ -32,10 +32,10 @@ class AdoptionTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory(prefix="adoption 日本語 ")
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
-        for name in ("component", "cli-starters", "tests/host"):
+        for name in ("component", "cli-starters", "tests/host", ".github/workflows", "scripts", "tooling"):
             shutil.copytree(ROOT / name, self.root / name)
         for name in ("template.json", "package.json", "README.md", "LICENSE", "AGENTS.md",
-                     ".gitattributes", "release-policy.json"):
+                     ".gitattributes", "release-policy.json", "workflow-contract.json"):
             shutil.copy2(ROOT / name, self.root / name)
         initialize(self.root, "UuidTest", "UuidTest", "uuid-test", "go", "Feature decisions remain required")
 
@@ -86,6 +86,15 @@ class AdoptionTests(unittest.TestCase):
         record(self.root, "macos-arm64", executable, False, "test")
         source = self.root / "cli/main.go"
         source.write_text(source.read_text() + "\n")
+        with self.assertRaisesRegex(ValueError, "stale"):
+            verify(self.root, "macos-arm64", executable)
+
+    def test_workflow_configuration_is_bound_to_native_provenance(self):
+        executable = self.root / "binary"
+        executable.write_bytes(b"build result")
+        record(self.root, "macos-arm64", executable, True, "test")
+        config = self.root / "workflow-contract.json"
+        config.write_text(config.read_text() + "\n")
         with self.assertRaisesRegex(ValueError, "stale"):
             verify(self.root, "macos-arm64", executable)
 

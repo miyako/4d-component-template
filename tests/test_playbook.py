@@ -71,6 +71,18 @@ class PlaybookTests(unittest.TestCase):
             self.assertIn("scripts/set-release-secrets.sh", text)
             self.assertNotIn("~/.copilot/skills/add-release-secrets-to-repo", text)
 
+    def test_canonical_contract_and_bounded_handoff_are_discoverable(self):
+        for source in (ROOT / "AGENTS.md", ROOT / "README.md", SKILL):
+            text = source.read_text()
+            with self.subTest(source=source):
+                self.assertIn("workflow-contract.json", text)
+                self.assertIn("scripts/workflow_contract.py", text)
+                self.assertIn("tooling/requirements-workflow.txt", text)
+        guide = (ROOT / "AGENTS.md").read_text()
+        for phrase in ("completion notifications", "one bounded status check",
+                       "never select unsigned"):
+            self.assertIn(phrase, guide)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -86,6 +86,16 @@ or packaging; do not turn an SDK requirement into a component resource.
    Downloaded asset/hash/host-evidence and collision checks precede new tag/release
    creation. Do not precreate tags or enable tag-push publication.
 
+## Canonical generated workflow contract
+
+Before initialization or workflow tests, install the pinned development-only
+`tooling/requirements-workflow.txt` in a Python environment and run
+`python3 scripts/workflow_contract.py --root .`. Initialization and CI/Publish
+enforce the inherited workflows. Use `workflow-contract.json` only for supported
+configuration; see [the extension contract](../../../AGENTS.md#enforced-generated-contract-and-bounded-configuration).
+Follow [the release entry points and handoff rules](../../../AGENTS.md#release-entry-points-handoff-and-bounded-waiting)
+for evidence and event-driven waiting. Do not invent per-project release flows.
+
 ## Optional credential setup
 
 For optional signed-release credential setup, follow the canonical

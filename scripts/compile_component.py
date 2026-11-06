@@ -15,6 +15,8 @@ def input_digest(root):
     component = root / "component" / config["repository"]
     files = [root / "template.json", root / "package.json", root / "LICENSE",
              component / "Project" / (config["repository"] + ".4DProject")]
+    if (root / "workflow-contract.json").exists():
+        files.append(root / "workflow-contract.json")
     for folder in ("Project/Sources", "Documentation", "Resources"):
         directory = component / folder
         if directory.exists():

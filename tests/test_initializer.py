@@ -2,12 +2,14 @@ import importlib.util
 import json
 from pathlib import Path
 import shutil
+import sys
 import tempfile
 import unittest
 import uuid
 import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts"))
 spec = importlib.util.spec_from_file_location("initialize", ROOT / "scripts" / "initialize.py")
 initializer = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(initializer)
@@ -20,9 +22,9 @@ class InitializerTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
-        for name in ("component", "cli-starters", "tests/host"):
+        for name in ("component", "cli-starters", "tests/host", ".github/workflows", "scripts", "tooling"):
             shutil.copytree(ROOT / name, self.root / name)
-        for name in ("template.json", "package.json", "README.md", "release-policy.json"):
+        for name in ("template.json", "package.json", "README.md", "release-policy.json", "workflow-contract.json"):
             shutil.copy2(ROOT / name, self.root / name)
 
     def configure(self, language="go", **changes):
@@ -44,6 +46,11 @@ class InitializerTests(unittest.TestCase):
                 self.assertEqual(config["language"], language)
                 self.assertEqual((destination / "release-policy.json").read_bytes(),
                                  (self.root / "release-policy.json").read_bytes())
+                from workflow_contract import validate as validate_workflows
+                self.assertEqual(validate_workflows(destination)["status"], "passed")
+                for path in (".github/workflows/ci.yml", ".github/workflows/publish.yml",
+                             "workflow-contract.json", "scripts/workflow_contract.py"):
+                    self.assertEqual((destination / path).read_bytes(), (self.root / path).read_bytes())
                 self.assertTrue(config["initialized"])
                 component = destination / "component" / "hello-tools"
                 self.assertTrue((component / "Project" / "hello-tools.4DProject").is_file())
@@ -87,9 +94,18 @@ class InitializerTests(unittest.TestCase):
         self.configure()
         self.assertEqual(policy.read_text(), content)
 
+    def test_invalid_workflow_contract_does_not_partially_initialize(self):
+        workflow = self.root / ".github/workflows/extra.yaml"
+        workflow.write_text("name: Unexpected\n")
+        before = {p.relative_to(self.root): p.read_bytes() for p in self.root.rglob("*") if p.is_file()}
+        with self.assertRaisesRegex(ValueError, "exactly"):
+            self.configure()
+        self.assertEqual(before, {p.relative_to(self.root): p.read_bytes()
+                                  for p in self.root.rglob("*") if p.is_file()})
+
     def test_initialization_preserves_credential_helper_and_canonical_links(self):
         helper = self.root / "scripts/set-release-secrets.sh"
-        helper.parent.mkdir()
+        helper.parent.mkdir(exist_ok=True)
         shutil.copy2(ROOT / "scripts/set-release-secrets.sh", helper)
         for name in ("AGENTS.md", ".github/skills/4d-cli-component/SKILL.md"):
             target = self.root / name
