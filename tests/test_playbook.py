@@ -53,6 +53,24 @@ class PlaybookTests(unittest.TestCase):
                 self.assertNotIn("--tag v0.1.0", text)
         self.assertIn('"tag": "0.1.0"', (ROOT / "README.md").read_text())
 
+    def test_credential_setup_matches_optional_signed_workflow(self):
+        workflow = (ROOT / ".github/workflows/publish.yml").read_text()
+        names = set(re.findall(r"secrets\.([A-Z_]+)", workflow))
+        self.assertEqual(names, {
+            "APPLE_DEVELOPER_ID_CERTIFICATE", "APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD",
+            "KEYCHAIN_PASSWORD", "NOTARYTOOL_APPLE_ID", "NOTARYTOOL_TEAM_ID",
+            "NOTARYTOOL_PASSWORD", "CODESIGN_APPLE_ID",
+        })
+        self.assertNotIn("secrets.", (ROOT / ".github/workflows/ci.yml").read_text())
+        guide = (ROOT / "AGENTS.md").read_text()
+        for name in names:
+            self.assertIn(name, guide)
+        for source in (ROOT / "README.md", SKILL):
+            text = source.read_text()
+            self.assertIn("user-owned-credential-setup-and-reuse", text)
+            self.assertIn("scripts/set-release-secrets.sh", text)
+            self.assertNotIn("~/.copilot/skills/add-release-secrets-to-repo", text)
+
 
 if __name__ == "__main__":
     unittest.main()

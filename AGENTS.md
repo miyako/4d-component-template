@@ -810,6 +810,90 @@ Keep public compiler pins/hosted opt-in under package metadata and Actions
 **Variables**, not Secrets. GitHub supplies the restricted publish job's
 `GITHUB_TOKEN`; no additional personal-token secret is needed.
 
+### User-owned credential setup and reuse
+
+Inspect the **actual destination workflow** before recommending secrets.
+This template's [Publish workflow](.github/workflows/publish.yml) consumes all
+seven names above only in its `apple_signing == 'true'` step; its
+[CI workflow](.github/workflows/ci.yml) and unsigned releases need none.
+Adapted unsigned or Windows-only workflows may likewise need no Apple secrets.
+Do not add signing requirements or triggers merely to use a helper.
+
+The **user owns all secret operations**. Agents must never execute
+[scripts/set-release-secrets.sh](scripts/set-release-secrets.sh),
+`gh secret set`, or real Keychain credential commands, read credential values,
+choose certificates, ask for secrets in chat, or log/commit values.
+Agents may inspect only names and timestamps before and after user setup:
+
+```sh
+gh secret list --repo OWNER/REPOSITORY
+```
+
+For user-approved signed-release setup, the user runs the following in their
+own macOS terminal, from the destination repository root. Prerequisites are
+zsh, the macOS `security` CLI, OpenSSL, base64, tr, mktemp, rm and authenticated
+GitHub CLI (`gh auth login`). No installed personal Copilot skill is required:
+
+```sh
+zsh scripts/set-release-secrets.sh OWNER/REPOSITORY
+```
+
+The helper reuses the macOS login Keychain service `4d-plugin-release`;
+the historical service name does not imply a plug-in architecture. A new
+repository does **not** require a new certificate. It sets exactly the six
+common secrets above, **not `CODESIGN_APPLE_ID`**. This template's signed
+workflow also requires that seventh secret: the user sets their chosen
+Developer ID Application identity or SHA-1 fingerprint separately through
+the destination's Actions Secrets UI. It is not a notarization email.
+
+For first-time setup when no certificate is stored, or deliberate replacement,
+the **user selects** a Developer ID Application `.p12` exported with its private
+key and supplies its path. Multiple repositories can share the stored values:
+
+```sh
+CERT_P12=/path/to/DeveloperID.p12 zsh scripts/set-release-secrets.sh OWNER/REPOSITORY OWNER/ANOTHER
+```
+
+`CERT_P12` replaces the stored certificate; it does not replace an already
+stored password. Missing other values are entered using hidden Keychain input.
+Only a missing-item Keychain status prompts for a new value; other lookup errors
+stop with a name/status diagnostic rather than overwriting inaccessible items.
+`KEYCHAIN_PASSWORD` must be an independent strong temporary-CI-keychain password.
+The helper checks that the stored certificate can open with the stored password,
+displays its subject and expiry, and asks for user confirmation before uploads.
+It temporarily decodes the certificate under `umask 077` and removes that file
+on exit. It does **not** explicitly verify private-key presence, enforce
+Developer ID Application identity, or reject expiry: the user must check those
+properties; the existing release signing gates remain authoritative.
+Although values are not printed, `security` CLI writes pass values as process
+arguments; run only in a trusted local session, not under tracing or command
+logging. The helper is not a promise of protection against local process inspection.
+
+To replace a stored value, the user deletes its item by **service and account**,
+not its display name, then reruns the helper:
+
+```sh
+security delete-generic-password -s 4d-plugin-release -a SECRET_NAME
+```
+
+For `SecKeychainItemImport: Unable to decode`, first compare exact workflow
+secret names and timestamps; missing/misnamed secrets are not source failures.
+An incorrect import passphrase can mean the stored `.p12` and password mismatch:
+the user replaces the relevant item or supplies their chosen `CERT_P12` and,
+if needed, replaces `APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD`. A missing-item
+message can also reflect denied Keychain access. OpenSSL 3 may reject legacy
+RC2/3DES `.p12` encryption; the helper retries with `-legacy`, which LibreSSL may
+not support. Both failed attempts stop before uploads.
+
+Uploads are sequential, not transactional: an error can leave earlier secrets
+or repositories updated. After user completion, inspect names/timestamps again,
+including the separately set `CODESIGN_APPLE_ID`; never inspect their values.
+Setup alone changes neither signing policy nor publication authorization.
+Separate user permission is required for main-only **Publish**, whose real
+inputs remain `mode` (patch/minor/major) and `require_apple_signing`.
+Never dispatch it as a setup check, invent a `tag` input or tag-push trigger,
+or prefix component SemVer tags with `v`.
+
 ## Official convention references
 
 Verified November 1, 2026:
