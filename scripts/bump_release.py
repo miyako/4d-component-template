@@ -21,6 +21,7 @@ import sys
 
 from ci_config import ROOT, load_config
 from initialize import github_repository
+from workflow_contract import configuration as workflow_configuration
 
 
 STABLE = r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
@@ -242,6 +243,30 @@ def plan(root, version, repository=None):
             raise ValueError(f"missing exact version contract assertions: {relative}")
         if contract != parse_json(before):
             save(relative, before, json.dumps(contract, indent=2, ensure_ascii=False) + "\n")
+    for surface in workflow_configuration(root)["version_surfaces"]:
+        relative = surface["path"]
+        before = updates.get(relative, read(relative))
+        if surface["kind"] == "json-pointer":
+            value = parse_json(before)
+            current = value
+            tokens = [token.replace("~1", "/").replace("~0", "~")
+                      for token in surface["pointer"][1:].split("/")]
+            for token in tokens[:-1]:
+                if not isinstance(current, dict) or token not in current:
+                    raise ValueError("missing version JSON pointer: " + relative)
+                current = current[token]
+            if not isinstance(current, dict) or current.get(tokens[-1]) != old:
+                raise ValueError("inconsistent version JSON pointer: " + relative)
+            current[tokens[-1]] = version
+            after = before if old == version else json.dumps(value, indent=2, ensure_ascii=False) + "\n"
+        else:
+            prefix, suffix = surface["prefix"], surface["suffix"]
+            pattern = re.escape(prefix) + r"(?P<version>[^\r\n]*?)" + re.escape(suffix)
+            matches = list(re.finditer(pattern, before))
+            if len(matches) != surface["count"] or any(match["version"] != old for match in matches):
+                raise ValueError("inconsistent literal version surface: " + relative)
+            after = re.sub(pattern, lambda match: prefix + version + suffix, before)
+        save(relative, before, after)
     return config, updates
 
 

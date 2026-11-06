@@ -12,6 +12,8 @@ def sha256(path):
 def source_digest(root):
     root = Path(root).resolve()
     files = [root / "template.json", root / "package.json"]
+    if (root / "workflow-contract.json").exists():
+        files.append(root / "workflow-contract.json")
     files += sorted(path for path in (root / "cli").rglob("*")
                     if path.is_file() and path.relative_to(root / "cli").parts[0] not in {"target", "build"})
     digest = hashlib.sha256()

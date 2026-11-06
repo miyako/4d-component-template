@@ -555,6 +555,94 @@ non-force main commit; rejection fails closed rather than bypassing protection.
 
 ### Two workflows: CI and manual Publish
 
+#### Enforced generated contract and bounded configuration
+
+The checked-in `ci.yml` and `publish.yml` are the canonical workflows inherited
+by destination repositories. There is no additional workflow generator or
+third user-facing workflow. Before initialization or local workflow tests:
+
+```sh
+python3 -m pip install -r tooling/requirements-workflow.txt
+python3 scripts/workflow_contract.py --root .
+```
+
+Use a local virtual environment when appropriate. This pinned YAML parser is
+development tooling, not a component runtime dependency. Validation never
+dispatches, builds, publishes or accesses credentials. CI and Publish run it
+before release version mutation; initialization rejects an invalid inherited
+contract before destination writes.
+
+`workflow-contract.json` selects the sole supported `cli-universal-v1` profile:
+native macOS Intel/ARM and Windows x64 CLI builds, universal resource assembly,
+macOS ARM64 tool4d source/compiled-package checks, and explicit unexecuted
+Intel/Windows 4D evidence. It does not add new platform support or make
+mandatory gates editable. Keep destination identity/language in `template.json`,
+compiler pins in `package.json.tool`, dependencies in selected-language
+manifests/lockfiles, and signing in `release-policy.json`.
+
+The optional `version_surfaces` array extends the bounded starter version
+registry; default `[]` requires no configuration. Supported entries are:
+
+```json
+[
+  {"kind":"json-pointer","path":"cli/metadata.json","pointer":"/own/version"},
+  {"kind":"literal","path":"cli/version.hpp","prefix":"release = \"","suffix":"\";","count":1}
+]
+```
+
+JSON pointers address Object properties, not array elements; escape `~` and `/`
+with `~0` and `~1`. Literal delimiters select an exact positive occurrence count.
+Every selected field must equal the current component version, including on a
+retry. Declare extensions after creating their destination files; paths are
+repository-relative, regular non-symlink files. Missing, ambiguous, stale,
+conflicting or escaping surfaces fail before version writes. Never register
+dependency/upstream versions or signing policy as component-version surfaces.
+Configuration changes invalidate native/compiler input provenance and require
+fresh acceptance.
+
+Platform/dependency differences are explicit implementation contracts, not
+freeform workflow hooks. This profile supports only the existing three targets.
+A dependency adaptation must define pinned source/lockfiles, selected-language
+build integration, license notices, native runtime inspection and same-revision
+digest-bound evidence before it can become a supported adapter. No generic
+third-party builder, arbitrary command hook or alternate platform profile is
+implemented here; unknown configuration is rejected rather than silently skipped.
+
+#### Release entry points, handoff and bounded waiting
+
+| Intent | Canonical entry point |
+| --- | --- |
+| Inspect configuration/tools | `scripts/doctor.py`; `scripts/workflow_contract.py` |
+| Local unsigned acceptance | `scripts/accept_local.py` |
+| Nonpublishing hosted inspection | Actions **CI**, with hosted 4D opt-in |
+| Optional credential setup | User-owned setup guide/helper below; never agent-executed |
+| Authorized publication | Actions **Publish**, main, `mode` and optional signing escalation |
+| Internal release stages | `bump_release.py` → reusable CI → `accept_hosted.py` / `sign_release.py` → `release_assets.py` / `release_ref.py` |
+
+Do not replace these stages with hand-assembled per-project checks. Before
+authorized signed publication, hand the user the existing setup guide and
+seven required names; inspect names/timestamps only after their setup. Missing
+credentials stop the signed path, never select unsigned or authorize repair.
+
+Use a compact release handoff from actual helper evidence: repository/version,
+accepted SHA, workflow run/phase, effective signing policy, artifact/evidence
+paths and SHA256, required checks (`passed` / `failed` / `not_run`), actual
+platform/tool scope, and one precise blocker or required user action.
+Preserve `result`, `finished` and `release_ready` as recorded; green native CLI
+jobs, successful compilation, or a file's presence cannot self-approve a ZIP.
+Tool4d host evidence does not establish normal IDE/Server loading or Dependency
+Manager installation.
+
+Advance on workflow/agent completion notifications. Read the identified run
+once when relevant completion arrives; inspect the failed phase's preserved
+reports rather than re-running successful phases speculatively. If no
+notification mechanism is available, make one bounded status check and return
+the pending run/phase instead of installing polling automation or repeatedly
+sleeping/reading. Keep existing finite subprocess/notary waits and diagnostic
+retention. A timeout is a stopped/failed check, not success. Retries, redispatch,
+credential changes and publication require their own authorization; never
+force/delete a tag or overwrite a release to recover.
+
 After the dispatch-capable workflow is merged to the **default branch**, open
 **Actions → CI → Run workflow** and select a branch for ordinary validation.
 `FOURD_ENABLED` still controls optional hosted 4D steps; CLI-only green is not

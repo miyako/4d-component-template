@@ -62,6 +62,8 @@ def validate(repository, namespace, cli, language, feature):
 def initialize(root, repository, namespace, cli, language, feature):
     root = Path(root).resolve()
     validate(repository, namespace, cli, language, feature)
+    from workflow_contract import validate as validate_workflows
+    validate_workflows(root)
     config_path = root / "template.json"
     old = json.loads(config_path.read_text(encoding="utf-8"))
     desired = dict(old, initialized=True, repository=repository, namespace=namespace,

@@ -67,6 +67,17 @@ inventory, including build smoke tests, host assertions and completion metadata.
 The uninitialized template is **not releasable** and normal template CI does not
 install three unrelated language toolchains.
 
+Before initialization or workflow tests, install the pinned development parser
+(preferably in a virtual environment) and validate the inherited contract:
+
+```sh
+python3 -m pip install -r tooling/requirements-workflow.txt
+python3 scripts/workflow_contract.py --root .
+```
+
+See [the enforced `workflow-contract.json` configuration](AGENTS.md#enforced-generated-contract-and-bounded-configuration)
+and [release entry points and handoff rules](AGENTS.md#release-entry-points-handoff-and-bounded-waiting).
+
 ## Requirements and specifications
 
 | Surface | Specification |

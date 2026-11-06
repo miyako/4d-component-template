@@ -22,9 +22,9 @@ class BumpReleaseTests(unittest.TestCase):
         self.root = ROOT / (".bump-release-test-" + uuid.uuid4().hex)
         self.root.mkdir()
         self.addCleanup(shutil.rmtree, self.root)
-        for name in ("component", "cli-starters", "tests/host"):
+        for name in ("component", "cli-starters", "tests/host", ".github/workflows", "scripts", "tooling"):
             shutil.copytree(ROOT / name, self.root / name)
-        for name in ("template.json", "package.json", "README.md"):
+        for name in ("template.json", "package.json", "README.md", "release-policy.json", "workflow-contract.json"):
             shutil.copy2(ROOT / name, self.root / name)
         shutil.copy2(ROOT / "tests/test_cli.py", self.root / "tests/test_cli.py")
         shutil.copy2(ROOT / "tests/cli-contract.json", self.root / "tests/cli-contract.json")
@@ -48,6 +48,43 @@ class BumpReleaseTests(unittest.TestCase):
     def snapshot(self):
         return {str(p.relative_to(self.root)): p.read_bytes()
                 for p in self.root.rglob("*") if p.is_file() and ".git" not in p.parts}
+
+    def extensions(self, surfaces):
+        path = self.root / "workflow-contract.json"
+        value = json.loads(path.read_text())
+        value["version_surfaces"] = surfaces
+        path.write_text(json.dumps(value) + "\n")
+
+    def test_bounded_version_extensions_compose_and_preserve_unrelated_fields(self):
+        self.configure("cpp")
+        metadata = self.root / "cli/extra.json"
+        metadata.write_text('{"own":{"version":"0.1.0"},"dependency":"0.1.0"}\n')
+        header = self.root / "cli/extra.hpp"
+        header.write_text('const auto release = "0.1.0";\n// dependency 0.1.0\n')
+        self.extensions([
+            {"kind": "json-pointer", "path": "cli/extra.json", "pointer": "/own/version"},
+            {"kind": "literal", "path": "cli/extra.hpp", "prefix": 'release = "',
+             "suffix": '";', "count": 1},
+        ])
+        bump_release.apply(self.root, "0.2.0")
+        self.assertEqual(json.loads(metadata.read_text()), {"own": {"version": "0.2.0"}, "dependency": "0.1.0"})
+        self.assertIn('release = "0.2.0";', header.read_text())
+        self.assertIn("// dependency 0.1.0", header.read_text())
+        self.assertEqual(bump_release.apply(self.root, "0.2.0")["changed_paths"], [])
+
+    def test_invalid_extension_validates_before_any_version_writes(self):
+        self.configure()
+        extra = self.root / "cli/extra.json"
+        extra.write_text('{"version":"9.9.9"}')
+        self.extensions([{"kind": "json-pointer", "path": "cli/extra.json", "pointer": "/version"}])
+        before = self.snapshot()
+        with self.assertRaisesRegex(ValueError, "inconsistent"):
+            bump_release.apply(self.root, "0.2.0")
+        self.assertEqual(before, self.snapshot())
+        extra.unlink()
+        extra.symlink_to(self.root / "package.json")
+        with self.assertRaisesRegex(ValueError, "non-symlink"):
+            bump_release.apply(self.root, "0.2.0")
 
     def test_all_languages_case_identity_renamed_class_and_idempotency(self):
         pristine = self.snapshot()

@@ -71,6 +71,14 @@ class CompilerTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "changed during compilation"):
                 compiler.compile_component(self.root, "/fake/tool4d")
 
+    def test_workflow_configuration_is_bound_to_compiler_input(self):
+        configuration = self.root / "workflow-contract.json"
+        shutil.copy2(ROOT / "workflow-contract.json", configuration)
+        with patch.object(compiler.subprocess, "run", side_effect=self.result):
+            status = compiler.compile_component(self.root, "/fake/tool4d")
+        configuration.write_text(configuration.read_text() + "\n")
+        self.assertNotEqual(status["input_sha256"], compiler.input_digest(self.root))
+
     def test_wrong_target_and_project_rejected(self):
         def wrong(*args, **kwargs):
             self.status.write_text('{"success":true,"project":"wrong","targets":["x86_64_generic"]}')

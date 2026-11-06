@@ -26,6 +26,9 @@ SEMVER = r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:0|[1-9]\d*|[0-9]*[A-Za
 
 
 def load_config(root=ROOT, *, initialized=False, repository=None, tag=None):
+    if (Path(root) / "workflow-contract.json").exists():
+        from workflow_contract import configuration as workflow_configuration
+        workflow_configuration(Path(root).resolve())
     config = json.loads((Path(root) / "template.json").read_text(encoding="utf-8"))
     if (not isinstance(config, dict) or type(config.get("schema")) is not int
             or config.get("schema") != 1 or type(config.get("initialized")) is not bool):
