@@ -23,6 +23,9 @@ import test_delivery as delivery
 
 
 SUBMISSION = "12345678-1234-4321-8765-123456789abc"
+TEAM = "Q1W2E3R4T5"
+FINGERPRINT = "0123456789ABCDEF0123456789ABCDEF01234567"
+IDENTITY = "Developer ID Application: Private Identity (" + TEAM + ")"
 
 
 class FakeTools:
@@ -42,6 +45,7 @@ class FakeTools:
         self.malformed_mount = False
         self.cleanup_fail = set()
         self.head = "a" * 40
+        self.identities = [(FINGERPRINT, IDENTITY)]
 
     def run(self, args, **kwargs):
         self.calls.append(list(args))
@@ -72,6 +76,10 @@ class FakeTools:
                 Path(args[-1]).write_bytes(b"keychain")
             elif action == "delete-keychain":
                 Path(args[-1]).unlink(missing_ok=True)
+            elif action == "find-identity":
+                assert args[2:5] == ["-v", "-p", "codesigning"] and args[-1].endswith(".keychain-db")
+                out = "".join(f'  {i}) {sha} "{name}"\n' for i, (sha, name) in enumerate(self.identities, 1))
+                out += f"     {len(self.identities)} valid identities found\n"
             elif action == "import":
                 certificate = Path(args[2])
                 assert stat.S_IMODE(certificate.stat().st_mode) == 0o600
@@ -155,6 +163,7 @@ class SigningTests(unittest.TestCase):
             name: "synthetic-sensitive-" + str(index) + "-value"
             for index, name in enumerate(signing.SECRET_NAMES)
         }
+        self.env["NOTARYTOOL_TEAM_ID"] = TEAM
         self.env["APPLE_DEVELOPER_ID_CERTIFICATE"] = base64.b64encode(
             b"synthetic not-a-real-p12").decode()
         self.env.update(GITHUB_ACTIONS="true", GITHUB_REPOSITORY="miyako/UuidTest",
@@ -287,6 +296,41 @@ class SigningTests(unittest.TestCase):
             self.secrets["APPLE_DEVELOPER_ID_CERTIFICATE"][i:i + 4]
             for i in range(0, len(self.secrets["APPLE_DEVELOPER_ID_CERTIFICATE"]), 4))
         self.assertEqual(signing.certificate_bytes(whitespace), b"synthetic not-a-real-p12")
+
+    def test_identity_is_inferred_from_the_temporary_keychain(self):
+        self.assertNotIn("CODESIGN_APPLE_ID", signing.SECRET_NAMES)
+        other = ("FEDCBA9876543210FEDCBA9876543210FEDCBA98", "Developer ID Application: Other (ZZZZZZZZZZ)")
+        apple = ("1111111111111111111111111111111111111111", "Apple Development: Private Identity (" + TEAM + ")")
+        for identities, message in (([], "found 0"), ([apple], "found 0"),
+                                    ([(FINGERPRINT, IDENTITY), other], "found 2"),
+                                    ([other], "team does not match")):
+            self.tools = FakeTools(self.secrets)
+            self.tools.identities = identities
+            with self.subTest(identities=identities), self.assertRaisesRegex(ValueError, message) as caught:
+                self.sign()
+            self.assertFalse(any(args[1] == "--force" for args in self.tools.calls))
+            self.assertTrue(any(args[1] == "delete-keychain" for args in self.tools.calls))
+            self.assert_no_leak(str(caught.exception))
+        self.assert_clean()
+
+    def test_optional_identity_pin_must_match_the_imported_certificate(self):
+        def lookup(pin):
+            secrets = dict(self.secrets)
+            if pin is not None:
+                secrets["CODESIGN_APPLE_ID"] = pin
+            tools = FakeTools(secrets)
+            keychain = signing.Keychain(signing.Commands(self.env, secrets), self.root, secrets)
+            with patch.object(signing.subprocess, "run", side_effect=tools.run):
+                return keychain.identity()
+        for pin in (None, IDENTITY, FINGERPRINT, FINGERPRINT.lower()):
+            with self.subTest(pin=pin):
+                self.assertEqual(lookup(pin), FINGERPRINT)
+        with self.assertRaisesRegex(ValueError, "does not match CODESIGN_APPLE_ID"):
+            lookup("Developer ID Application: Someone Else (" + TEAM + ")")
+        with patch.dict(self.env, {"CODESIGN_APPLE_ID": IDENTITY}):
+            self.sign()
+        signed = [args for args in self.tools.calls if args[1] == "--force"]
+        self.assertTrue(signed and all(args[args.index("--sign") + 1] == FINGERPRINT for args in signed))
 
     def test_command_error_redacts_every_value_and_does_not_echo_argv(self):
         self.tools.fail = lambda args: True
@@ -499,7 +543,11 @@ class SigningTests(unittest.TestCase):
         self.assertFalse(any(args[1] == "default-keychain" for args in calls))
         signed = [args for args in calls if args[0] == signing.CODESIGN and args[1] == "--force"]
         self.assertEqual(len(signed), 3)
+        lookup_index = next(i for i, args in enumerate(calls) if args[1] == "find-identity")
+        self.assertLess(calls.index(imported), lookup_index)
+        self.assertLess(lookup_index, calls.index(signed[0]))
         for args in signed:
+            self.assertEqual(args[args.index("--sign") + 1], FINGERPRINT)
             self.assertIn("--timestamp", args)
             self.assertIn("--keychain", args)
             self.assertIn("--identifier", args)
