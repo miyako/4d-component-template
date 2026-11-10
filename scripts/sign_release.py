@@ -2,8 +2,9 @@
 """Fail-closed Apple signing of a compiled release, notarized through a DMG.
 
 `policy` is secret-free and platform independent; absent policy means unsigned.
-`sign` requires macOS GitHub Actions, a matching candidate version, and all seven
-credentials. It never signs the source component or treats a .4dbase as an app.
+`sign` requires macOS GitHub Actions, a matching candidate version, and the six
+required credentials. The signing identity is read from the temporary keychain
+holding the imported certificate; optional CODESIGN_APPLE_ID only pins it. It never signs the source component or treats a .4dbase as an app.
 Both commands accept --require-apple-signing, which can only upgrade policy.
 RELEASE_TAG/RELEASE_SHA identify the future tag and exact version commit;
 the checked-out HEAD must equal that commit before any tag is created.
@@ -38,8 +39,12 @@ import package_component
 SECRET_NAMES = (
     "APPLE_DEVELOPER_ID_CERTIFICATE", "APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD",
     "KEYCHAIN_PASSWORD", "NOTARYTOOL_APPLE_ID", "NOTARYTOOL_TEAM_ID",
-    "NOTARYTOOL_PASSWORD", "CODESIGN_APPLE_ID",
+    "NOTARYTOOL_PASSWORD",
 )
+# Optional: when set, the identity found in the temporary keychain must match it
+# (full "Developer ID Application: Name (TEAMID)" or SHA-1 fingerprint).
+OPTIONAL_SECRET_NAMES = ("CODESIGN_APPLE_ID",)
+IDENTITY_LINE = re.compile(r'^\s*\d+\)\s+([0-9A-Fa-f]{40})\s+"(Developer ID Application: .*\(([A-Z0-9]+)\))"\s*$')
 SECURITY = "/usr/bin/security"
 CODESIGN = "/usr/bin/codesign"
 HDIUTIL = "/usr/bin/hdiutil"
@@ -106,7 +111,10 @@ def credentials(env):
     if missing:
         raise SigningError("missing required credentials: " + ", ".join(missing))
     secrets = {name: env[name] for name in SECRET_NAMES}
-    if secrets["CODESIGN_APPLE_ID"].strip() == "-":
+    for name in OPTIONAL_SECRET_NAMES:
+        if env.get(name, "").strip():
+            secrets[name] = env[name].strip()
+    if secrets.get("CODESIGN_APPLE_ID") == "-":
         raise SigningError("ad-hoc signing identity is prohibited")
     return secrets
 
@@ -116,7 +124,8 @@ class Commands:
 
     def __init__(self, env, secrets):
         self.secrets = secrets
-        self.env = {key: value for key, value in env.items() if key not in SECRET_NAMES}
+        self.env = {key: value for key, value in env.items()
+                    if key not in SECRET_NAMES + OPTIONAL_SECRET_NAMES}
         self.env["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
 
     def run(self, label, args, timeout=120, *, cwd=None):
@@ -180,6 +189,25 @@ class Keychain:
         ])
         self.commands.run("keychain isolate", [SECURITY, "list-keychains", "-d", "user", "-s", self.path])
         self.p12.unlink()
+
+    def identity(self):
+        """SHA-1 of the one Developer ID Application identity imported into this keychain.
+
+        Fails closed on none, several, or a team other than NOTARYTOOL_TEAM_ID, and
+        checks the optional CODESIGN_APPLE_ID pin instead of trusting it blindly.
+        """
+        out, _ = self.commands.run("identity lookup", [
+            SECURITY, "find-identity", "-v", "-p", "codesigning", self.path])
+        found = [match for match in map(IDENTITY_LINE.match, out.splitlines()) if match]
+        if len(found) != 1:
+            raise SigningError(f"identity lookup: expected one Developer ID Application identity, found {len(found)}")
+        fingerprint, name, team = found[0].groups()
+        if team != self.secrets["NOTARYTOOL_TEAM_ID"].strip():
+            raise SigningError("identity lookup: certificate team does not match NOTARYTOOL_TEAM_ID")
+        pinned = self.secrets.get("CODESIGN_APPLE_ID")
+        if pinned is not None and pinned not in (name, fingerprint) and pinned.upper() != fingerprint.upper():
+            raise SigningError("identity lookup: imported certificate does not match CODESIGN_APPLE_ID")
+        return fingerprint.upper()
 
     def cleanup(self):
         errors = []
@@ -498,8 +526,9 @@ def sign_release(root=ROOT, env=None, *, require_apple_signing=False):
                         raise
             relative_paths = [path.relative_to(staged).as_posix() for path in signed]
             keychain.prepare(data)
+            identity = keychain.identity()
             for path, relative in zip(signed, relative_paths):
-                sign_file(commands, path, secrets["CODESIGN_APPLE_ID"], keychain.path,
+                sign_file(commands, path, identity, keychain.path,
                           "org.4d." + config["repository"] + "." + relative.replace("/", "."))
                 signature(commands, path, secrets["NOTARYTOOL_TEAM_ID"],
                           architectures=macho_architectures(path))
@@ -510,7 +539,7 @@ def sign_release(root=ROOT, env=None, *, require_apple_signing=False):
                 HDIUTIL, "create", "-srcfolder", payload, "-volname", config["repository"],
                 "-fs", "HFS+", "-format", "UDZO", dmg,
             ])
-            sign_file(commands, dmg, secrets["CODESIGN_APPLE_ID"], keychain.path,
+            sign_file(commands, dmg, identity, keychain.path,
                       "org.4d." + config["repository"] + ".release", runtime=False)
             signature(commands, dmg, secrets["NOTARYTOOL_TEAM_ID"], runtime=False)
             identifier = notarize(commands, dmg, secrets)

@@ -75,7 +75,9 @@ or packaging; do not turn an SDK requirement into a component resource.
    ZIP and adjacent evidence without publishing. Release signing is implemented:
    `release-policy.json.apple_notarized_versions` defaults to unsigned; a listed
    version or manual `require_apple_signing` opts in. Only that branch receives
-   the seven secrets, signs an isolated copy, notarizes/staples its DMG, repacks
+   the signing secrets, takes the signing identity from the imported
+   certificate (exactly one Developer ID Application identity of
+   `NOTARYTOOL_TEAM_ID`; optional `CODESIGN_APPLE_ID` only pins it), signs an isolated copy, notarizes/staples its DMG, repacks
    the ZIP from the final mounted DMG and reruns exact final ZIP compiled-host
    acceptance. Missing credentials or signing errors never downgrade to unsigned.
    Keep exactly CI and Publish workflows. Manual Publish on main accepts
@@ -103,9 +105,9 @@ For optional signed-release credential setup, follow the canonical
 Inspect the actual destination workflow first: unsigned/Windows-only workflows
 may need no Apple secrets. The bundled
 [scripts/set-release-secrets.sh](../../../scripts/set-release-secrets.sh)
-is **user-run only** and sets six common secrets; this template's signed Publish
-also requires the separately user-set `CODESIGN_APPLE_ID` identity/fingerprint,
-not email. Agents must not execute the helper or real Keychain/secret operations,
+is **user-run only** and sets the six required secrets. Signed Publish infers
+the signing identity from the imported certificate; `CODESIGN_APPLE_ID` is an
+optional pin (identity or SHA-1 fingerprint, not email). Agents must not execute the helper or real Keychain/secret operations,
 read values, choose certificates or ask for secrets in chat; only
 `gh secret list --repo OWNER/REPOSITORY` names/timestamps may be inspected.
 Setup never authorizes publication or changes the unsigned-default policy.

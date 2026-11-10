@@ -621,7 +621,7 @@ implemented here; unknown configuration is rejected rather than silently skipped
 
 Do not replace these stages with hand-assembled per-project checks. Before
 authorized signed publication, hand the user the existing setup guide and
-seven required names; inspect names/timestamps only after their setup. Missing
+six required names; inspect names/timestamps only after their setup. Missing
 credentials stop the signed path, never select unsigned or authorize repair.
 
 Use a compact release handoff from actual helper evidence: repository/version,
@@ -833,7 +833,7 @@ Bare CLI executables are not stapled: the DMG is the notarized/stapled container
 The ZIP is repacked from its actual final mounted component, preserving the
 existing `.4dbase` layout without introducing an application `Contents/` tree.
 
-### Version policy and seven Apple secrets
+### Version policy and Apple secrets
 
 `release-policy.json` is independent of template identity and is preserved by
 initialization. It defaults to
@@ -892,7 +892,7 @@ YAML, logs, package metadata or a PR.
 | `NOTARYTOOL_APPLE_ID` | The Apple account **email address** authorized to notarize for the Developer team. |
 | `NOTARYTOOL_TEAM_ID` | The Apple Developer **Team ID** for the signing identity and notarization account. |
 | `NOTARYTOOL_PASSWORD` | An Apple **app-specific password** for notarization, **not the normal Apple account login password**. |
-| `CODESIGN_APPLE_ID` | Despite the misleading name, the full **Developer ID Application signing identity**, such as `Developer ID Application: Organization (TEAMID)`, or its certificate **SHA-1 identity fingerprint**. **Not an email address.** |
+| `CODESIGN_APPLE_ID` | **Optional.** Not needed: the signing identity is read from the temporary keychain that holds the imported `.p12`, which must contain exactly one Developer ID Application identity whose team is `NOTARYTOOL_TEAM_ID`. If set, it pins that identity and the release fails when they differ. Value: the full identity, such as `Developer ID Application: Organization (TEAMID)`, or its SHA-1 fingerprint. **Not an email address.** |
 
 Keep public compiler pins/hosted opt-in under package metadata and Actions
 **Variables**, not Secrets. GitHub supplies the restricted publish job's
@@ -901,8 +901,9 @@ Keep public compiler pins/hosted opt-in under package metadata and Actions
 ### User-owned credential setup and reuse
 
 Inspect the **actual destination workflow** before recommending secrets.
-This template's [Publish workflow](.github/workflows/publish.yml) consumes all
-seven names above only in its `apple_signing == 'true'` step; its
+This template's [Publish workflow](.github/workflows/publish.yml) passes the
+seven names above only to its `apple_signing == 'true'` step (six required, the
+identity pin optional); its
 [CI workflow](.github/workflows/ci.yml) and unsigned releases need none.
 Adapted unsigned or Windows-only workflows may likewise need no Apple secrets.
 Do not add signing requirements or triggers merely to use a helper.
@@ -929,10 +930,9 @@ zsh scripts/set-release-secrets.sh OWNER/REPOSITORY
 The helper reuses the macOS login Keychain service `4d-plugin-release`;
 the historical service name does not imply a plug-in architecture. A new
 repository does **not** require a new certificate. It sets exactly the six
-common secrets above, **not `CODESIGN_APPLE_ID`**. This template's signed
-workflow also requires that seventh secret: the user sets their chosen
-Developer ID Application identity or SHA-1 fingerprint separately through
-the destination's Actions Secrets UI. It is not a notarization email.
+required secrets above. The signed workflow infers the signing identity from
+the imported certificate, so `CODESIGN_APPLE_ID` is not needed; a user who wants
+to pin the identity may set it separately. It is not a notarization email.
 
 For first-time setup when no certificate is stored, or deliberate replacement,
 the **user selects** a Developer ID Application `.p12` exported with its private
@@ -974,8 +974,9 @@ RC2/3DES `.p12` encryption; the helper retries with `-legacy`, which LibreSSL ma
 not support. Both failed attempts stop before uploads.
 
 Uploads are sequential, not transactional: an error can leave earlier secrets
-or repositories updated. After user completion, inspect names/timestamps again,
-including the separately set `CODESIGN_APPLE_ID`; never inspect their values.
+or repositories updated. After user completion, inspect names/timestamps again
+(the six required names; `CODESIGN_APPLE_ID` only if the user pinned one); never
+inspect their values.
 Setup alone changes neither signing policy nor publication authorization.
 Separate user permission is required for main-only **Publish**, whose real
 inputs remain `mode` (patch/minor/major) and `require_apple_signing`.
