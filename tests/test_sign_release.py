@@ -151,6 +151,10 @@ class SigningTests(unittest.TestCase):
         fixture.write_config()
         library = component / "Libraries/lib4d-arm64.dylib"
         library.write_bytes(delivery.synthetic_universal()[80:112])
+        # Initialized repositories have workflow-contract.json, which is a compile input:
+        # signing's package mirror must carry it too (it failed the first real signed Publish).
+        (self.root / "workflow-contract.json").write_text(
+            '{"schema":1,"profile":"cli-universal-v1","version_surfaces":[]}\n')
         fixture.write_status()
         self.fixture = fixture
         self.policy = self.root / "release-policy.json"

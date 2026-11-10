@@ -33,6 +33,7 @@ import uuid
 import zipfile
 
 from ci_config import ROOT, SEMVER, load_config
+import compile_component
 import package_component
 
 
@@ -324,7 +325,8 @@ def prepare_payload(root, scratch, config, unsigned):
     """Reproduce the unsigned artifact to bind every archive byte to compilation."""
     mirror = scratch / "inputs"
     mirror.mkdir()
-    for name in ("template.json", "package.json", "LICENSE"):
+    # Same root files as the compile input digest, or the mirror can never match it.
+    for name in compile_component.root_inputs(root):
         shutil.copy2(root / name, mirror / name)
     component = root / "component" / config["repository"]
     if component.is_symlink() or component.parent.is_symlink():

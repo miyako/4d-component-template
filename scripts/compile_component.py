@@ -9,14 +9,23 @@ import shutil
 import hashlib
 
 
+# Repository-root files bound into the compile inputs. Anything that rebuilds a
+# package elsewhere (sign_release.prepare_payload) must copy the same files.
+ROOT_INPUTS = ("template.json", "package.json", "LICENSE")
+OPTIONAL_ROOT_INPUTS = ("workflow-contract.json",)
+
+
+def root_inputs(root):
+    root = Path(root)
+    return list(ROOT_INPUTS) + [name for name in OPTIONAL_ROOT_INPUTS if (root / name).exists()]
+
+
 def input_digest(root):
     root = Path(root).resolve()
     config = json.loads((root / "template.json").read_text())
     component = root / "component" / config["repository"]
-    files = [root / "template.json", root / "package.json", root / "LICENSE",
-             component / "Project" / (config["repository"] + ".4DProject")]
-    if (root / "workflow-contract.json").exists():
-        files.append(root / "workflow-contract.json")
+    files = [root / name for name in root_inputs(root)]
+    files.append(component / "Project" / (config["repository"] + ".4DProject"))
     for folder in ("Project/Sources", "Documentation", "Resources"):
         directory = component / folder
         if directory.exists():
