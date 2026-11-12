@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate the inherited CI/Publish contract without running release operations."""
+"""Validate the inherited CI, Bump version and Build roles without mutations."""
 import argparse
 import ast
 import json
@@ -23,20 +23,10 @@ COMMANDS = {
     "scripts/build_cli.py": 'python scripts/build_cli.py --target "$CLI_TARGET" --language "$CLI_LANGUAGE"',
     "ci_config.py assemble": "python scripts/ci_config.py assemble",
     "ci_config.py download-tool4d": "python scripts/ci_config.py download-tool4d",
-    "bump_release.py next": 'python scripts/bump_release.py next --mode "$MODE"',
-    "bump_release.py apply": 'python scripts/bump_release.py apply --version "$VERSION" --stage',
+    "release_source.py --repository": 'python scripts/release_source.py --repository "$GITHUB_REPOSITORY" preflight',
+    "release_source.py": 'python scripts/release_source.py --repository "$GITHUB_REPOSITORY" bump --mode "$MODE"',
     "ci_config.py validate": 'python scripts/ci_config.py validate --release --tag "$RELEASE_TAG"',
-    "release_ref.py available": 'python scripts/release_ref.py available --repository "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG"',
     "pip install -r tooling/requirements-workflow.txt": "python -m pip install -r tooling/requirements-workflow.txt",
-    "git commit": '''
-if ! git diff --cached --quiet; then
-  git config user.name "github-actions[bot]"
-  git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-  git commit -m "Release $VERSION"
-  git push origin HEAD:refs/heads/main
-fi
-echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-''',
     "scripts/release_assets.py": '''
 signing=()
 if [ "$APPLE_SIGNING" = "true" ]; then signing+=(--require-apple-signing); fi
@@ -161,12 +151,13 @@ def validate(root=ROOT):
     configuration(root)
     folder = root / ".github/workflows"
     require(folder.is_dir() and not folder.is_symlink(), "missing workflow directory")
-    require({p.name for p in folder.iterdir()} == {"ci.yml", "publish.yml"},
-            "exactly ci.yml and publish.yml are required")
+    require({p.name for p in folder.iterdir()} == {"ci.yml", "bump-version.yml", "build.yml"},
+            "exactly ci.yml, bump-version.yml and build.yml are required")
     documents = {name: yaml_document(regular(root, ".github/workflows/" + name + ".yml"))
-                 for name in ("ci", "publish")}
-    ci, publish = documents["ci"], documents["publish"]
-    require(ci.get("name") == "CI" and publish.get("name") == "Publish", "workflow names must be CI/Publish")
+                 for name in ("ci", "bump-version", "build")}
+    ci, bump, build = documents["ci"], documents["bump-version"], documents["build"]
+    require(ci.get("name") == "CI" and bump.get("name") == "Bump version"
+            and build.get("name") == "Build", "workflow names must be CI/Bump version/Build")
     ci_trigger = ci.get("on")
     require(isinstance(ci_trigger, dict), "CI triggers must be an object")
     reusable = ci_trigger.get("workflow_call")
@@ -183,24 +174,31 @@ def validate(root=ROOT):
             "source_sha": {"type": "string", "default": ""},
             "release_call": {"type": "boolean", "default": False}}},
     }, "CI triggers/reusable inputs must retain the canonical contract")
-    trigger = publish.get("on")
-    require(isinstance(trigger, dict) and set(trigger) == {"workflow_dispatch"},
-            "Publish must be manual only")
-    inputs = trigger["workflow_dispatch"]["inputs"]
-    require(set(inputs) == {"mode", "require_apple_signing"}, "unexpected Publish inputs")
-    mode = inputs["mode"]
+    for document in (bump, build):
+        trigger = document.get("on")
+        require(isinstance(trigger, dict) and set(trigger) == {"workflow_dispatch"},
+                "release-facing actions must be manual only")
+    bump_inputs = bump["on"]["workflow_dispatch"]["inputs"]
+    require(set(bump_inputs) == {"mode"}, "Bump version accepts only mode")
+    mode = bump_inputs["mode"]
     require(mode.get("type") == "choice" and mode.get("required") is True
             and mode.get("options") == ["patch", "minor", "major"] and mode.get("default") == "patch",
-            "Publish requires patch/minor/major with default patch")
+            "Bump version requires patch/minor/major with default patch")
+    inputs = build["on"]["workflow_dispatch"]["inputs"]
+    require(set(inputs) == {"require_apple_signing"}, "Build has no tag/version/bump inputs")
     signing = inputs["require_apple_signing"]
     require(signing.get("type") == "boolean" and signing.get("default") is False
             and signing.get("required") is False, "signing input must remain optional escalation")
-    require(publish.get("concurrency") == {"group": "publish", "cancel-in-progress": False},
-            "Publish must not cancel an active publication")
+    require(build.get("concurrency") == {"group": "publish", "cancel-in-progress": False},
+            "Build must not cancel an active publication")
+    require(bump.get("concurrency") == {
+        "group": "bump-version-${{ github.ref }}", "cancel-in-progress": False},
+        "serialize source bumps per selected branch")
     expected_jobs = {
         "ci": {"configuration": None, "native": "configuration", "assembly": ["configuration", "native"]},
-        "publish": {"version": None, "native": "version", "compile": ["version", "native"],
-                    "publish": ["version", "compile"]},
+        "bump-version": {"bump": None},
+        "build": {"preflight": None, "native": "preflight", "compile": ["preflight", "native"],
+                  "publish": ["preflight", "compile"]},
     }
     for name, document in documents.items():
         require(document.get("permissions") == {"contents": "read"}, "default contents permission must be read")
@@ -208,20 +206,24 @@ def validate(root=ROOT):
         require(set(jobs) == set(expected_jobs[name]), "unsupported job graph: " + name)
         for job_name, job in jobs.items():
             require(job.get("needs") == expected_jobs[name][job_name], "missing mandatory job dependency")
-            permissions = {"contents": "write"} if name == "publish" and job_name in {"version", "publish"} else None
+            permissions = ({"contents": "write"} if (name, job_name) in {
+                ("bump-version", "bump"), ("build", "publish")} else None)
             require(job.get("permissions") == permissions, "unexpected job write permission")
-            require(name != "publish" or "if" not in job, "Publish jobs cannot bypass acceptance")
+            require(name == "ci" or "if" not in job, "release jobs cannot bypass acceptance")
             require("continue-on-error" not in job, "job failure bypass prohibited")
             for step in job.get("steps", []):
                 require("continue-on-error" not in step, "step failure bypass prohibited")
                 if step.get("uses") == "actions/checkout@v4":
                     expected_ref = ("${{ inputs.source_sha || github.sha }}" if name == "ci" else
-                                    "main" if job_name == "version" else "${{ needs.version.outputs.source_sha }}")
+                                    "${{ github.sha }}" if job_name in {"bump", "preflight"}
+                                    else "${{ needs.preflight.outputs.source_sha }}")
                     require(step.get("with", {}).get("ref") == expected_ref, "checkout must use canonical source SHA")
-    native = publish["jobs"]["native"]
+                    if job_name in {"bump", "preflight", "publish"}:
+                        require(step["with"].get("fetch-depth") == 0, "release source requires full history")
+    native = build["jobs"]["native"]
     require(native.get("uses") == "./.github/workflows/ci.yml"
-            and native.get("with") == {"source_sha": "${{ needs.version.outputs.source_sha }}", "release_call": True},
-            "Publish must reuse CI at the version SHA without duplicate host acceptance")
+            and native.get("with") == {"source_sha": "${{ needs.preflight.outputs.source_sha }}", "release_call": True},
+            "Build must reuse CI at the dispatch SHA without duplicate host acceptance")
 
     def command(job, needle, condition=None):
         steps = job["steps"]
@@ -232,37 +234,58 @@ def validate(root=ROOT):
             invocation(matches[0][1], COMMANDS[needle], needle)
         return matches[0]
 
-    version = publish["jobs"]["version"]
+    version = build["jobs"]["preflight"]
     guard = version["steps"][0]
     guard_commands = [tokens for line in guard.get("run", "").splitlines()
                       if (tokens := shell_tokens(line))]
     require(guard.get("if") == "github.ref != 'refs/heads/main'"
             and len(guard_commands) == 2 and guard_commands[0][0] == "echo"
-            and guard_commands[1] == ["exit", "1"], "Publish requires a fail-closed main guard")
+            and guard_commands[1] == ["exit", "1"], "Build requires a fail-closed main guard")
     order = [command(version, needle)[0] for needle in (
-        "scripts/workflow_contract.py", "bump_release.py next", "bump_release.py apply",
-        "ci_config.py validate", "release_ref.py available", "sign_release.py", "git commit")]
+        "scripts/workflow_contract.py", "release_source.py --repository",
+        "ci_config.py validate", "sign_release.py")]
     require(order == sorted(order), "release preparation order changed")
-    require('--stage' in command(version, "bump_release.py apply")[1]["run"], "stage only validated version changes")
-    require("git push origin HEAD:refs/heads/main" in command(version, "git commit")[1]["run"],
-            "version commit must precede the exact SHA handoff")
     require(version["outputs"] == {
-        "source_sha": "${{ steps.commit.outputs.sha }}", "release_tag": "${{ steps.version.outputs.tag }}",
+        "source_sha": "${{ steps.source.outputs.source_sha }}", "release_tag": "${{ steps.source.outputs.release_tag }}",
         "apple_signing": "${{ steps.signing_policy.outputs.apple_signing }}"},
-        "version outputs must identify the accepted SHA/tag/policy")
-    require(command(version, "bump_release.py next")[1].get("env", {}).get("MODE") == "${{ inputs.mode }}"
-            and command(version, "bump_release.py apply")[1].get("env", {}).get("VERSION") == "${{ steps.version.outputs.version }}",
-            "version calculation must consume the semantic selector")
-    compile_job = publish["jobs"]["compile"]
-    require(compile_job["env"].get("RELEASE_SHA") == "${{ needs.version.outputs.source_sha }}"
-            and compile_job["env"].get("RELEASE_TAG") == "${{ needs.version.outputs.release_tag }}",
+        "preflight outputs must identify the dispatch SHA/source version/policy")
+    source = command(version, "release_source.py --repository")[1]
+    require(source.get("id") == "source" and source.get("env") == {"GH_TOKEN": "${{ github.token }}"},
+            "preflight must check authenticated remote availability")
+    bump_job = bump["jobs"]["bump"]
+    require(command(bump_job, "scripts/workflow_contract.py")[0]
+            < command(bump_job, "release_source.py")[0], "validate before source mutation")
+    require(command(bump_job, "release_source.py")[1].get("env") == {"MODE": "${{ inputs.mode }}"},
+            "source-only bump consumes the semantic selector")
+    require(command(version, "ci_config.py validate")[1].get("env") == {
+        "FOURD_ENABLED": "${{ vars.FOURD_ENABLED }}", "RELEASE_TAG": "${{ steps.source.outputs.release_tag }}"},
+        "preflight requires explicit hosted 4D opt-in for the source version")
+    for job, allowed in ((bump_job, {"workflow_contract.py", "release_source.py",
+                                    "pip install -r tooling/requirements-workflow.txt"}),
+                         (version, {"workflow_contract.py", "release_source.py --repository",
+                                    "ci_config.py validate", "sign_release.py",
+                                    "pip install -r tooling/requirements-workflow.txt"})):
+        for step in job["steps"]:
+            if step is guard:
+                continue
+            if "run" in step:
+                require(sum(needle in step["run"] for needle in allowed) == 1,
+                        "source preparation cannot build, tag, release or dispatch")
+            else:
+                require(step.get("uses") in {"actions/checkout@v4", "actions/setup-python@v5"},
+                        "source preparation may only use checkout and Python setup")
+        require(sum(step.get("uses") == "actions/checkout@v4" for step in job["steps"]) == 1,
+                "source preparation requires exactly one immutable checkout")
+    compile_job = build["jobs"]["compile"]
+    require(compile_job["env"].get("RELEASE_SHA") == "${{ needs.preflight.outputs.source_sha }}"
+            and compile_job["env"].get("RELEASE_TAG") == "${{ needs.preflight.outputs.release_tag }}",
             "compiler/signing environment must use the version SHA/tag")
     command(compile_job, "ci_config.py validate")
     command(compile_job, "ci_config.py download-tool4d")
     acceptance = [step for step in compile_job["steps"] if "scripts/accept_hosted.py" in step.get("run", "")]
     require(len(acceptance) == 2, "require separate unsigned/signed acceptance branches")
     for step, enabled in zip(acceptance, ("false", "true")):
-        require(step.get("if") == "needs.version.outputs.apple_signing == '" + enabled + "'",
+        require(step.get("if") == "needs.preflight.outputs.apple_signing == '" + enabled + "'",
                 "acceptance must follow effective signing policy")
         require(("--require-apple-signing" in step["run"]) == (enabled == "true"),
                 "signing cannot be downgraded")
@@ -274,7 +297,7 @@ def validate(root=ROOT):
                                        if enabled == "true" else {}), "signing secret contract changed")
     for name, document in documents.items():
         references = re.findall(r"secrets\.([A-Z_]+)", json.dumps(document))
-        require(sorted(references) == (sorted(SECRETS) if name == "publish" else []),
+        require(sorted(references) == (sorted(SECRETS) if name == "build" else []),
                 "secret references outside the signed acceptance step")
         for job in document["jobs"].values():
             for step in job.get("steps", []):
@@ -283,12 +306,12 @@ def validate(root=ROOT):
                         "credential setup is user-owned")
                 if step is not acceptance[1]:
                     require("secrets." not in text, "secrets must only reach the gated signing stage")
-    publication = command(publish["jobs"]["publish"], "scripts/release_assets.py")[1]
+    publication = command(build["jobs"]["publish"], "scripts/release_assets.py")[1]
     require("--create-tag --publish" in publication["run"]
             and '"$RELEASE_SHA"' in publication["run"], "verify accepted assets before atomic tag/publication")
-    require(publication["env"].get("RELEASE_SHA") == "${{ needs.version.outputs.source_sha }}"
-            and publication["env"].get("RELEASE_TAG") == "${{ needs.version.outputs.release_tag }}"
-            and publication["env"].get("APPLE_SIGNING") == "${{ needs.version.outputs.apple_signing }}",
+    require(publication["env"].get("RELEASE_SHA") == "${{ needs.preflight.outputs.source_sha }}"
+            and publication["env"].get("RELEASE_TAG") == "${{ needs.preflight.outputs.release_tag }}"
+            and publication["env"].get("APPLE_SIGNING") == "${{ needs.preflight.outputs.apple_signing }}",
             "publication environment must use the accepted SHA/tag/policy")
     for needle in ("workflow_contract.py", "generate_icons.py", "unittest discover", "ci_config.py matrix"):
         command(ci["jobs"]["configuration"], needle)
@@ -321,7 +344,7 @@ def validate(root=ROOT):
                      '--tool4d .tools/tool4d.app/Contents/MacOS/tool4d', "CI package acceptance")
     for name, job, artifacts in (
         ("ci", ci["jobs"]["assembly"], {"component-resources", "compiled-component", "component-acceptance-diagnostics"}),
-        ("publish", compile_job, {"compiled-release", "release-acceptance-diagnostics"}),
+        ("build", compile_job, {"compiled-release", "release-acceptance-diagnostics"}),
     ):
         uploads = {step["with"]["name"]: step for step in job["steps"]
                    if step.get("uses") == "actions/upload-artifact@v4"}
@@ -342,11 +365,11 @@ def validate(root=ROOT):
                 "signing policy must execute the checked escalation-only program")
     except SyntaxError as error:
         raise ValueError("invalid signing policy program") from error
-    for job in (ci["jobs"]["configuration"], version):
+    for job in (ci["jobs"]["configuration"], version, bump_job):
         install = command(job, "pip install -r tooling/requirements-workflow.txt")[0]
         require(install < command(job, "workflow_contract.py")[0],
                 "install pinned parser before contract validation")
-    for helper in ("workflow_contract.py", "bump_release.py", "ci_config.py", "build_cli.py",
+    for helper in ("workflow_contract.py", "bump_release.py", "release_source.py", "ci_config.py", "build_cli.py",
                    "accept_hosted.py", "sign_release.py", "release_assets.py", "release_ref.py",
                    "set-release-secrets.sh"):
         regular(root, "scripts/" + helper)

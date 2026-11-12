@@ -156,12 +156,12 @@ class BumpReleaseTests(unittest.TestCase):
         for mode, version in (("patch", "3.4.6"), ("minor", "3.5.0"), ("major", "4.0.0")):
             self.assertEqual(bump_release.next_version(self.root, mode)["version"], version)
 
-    def test_retry_equal_version_validates_all_surfaces_and_does_not_bump_again(self):
+    def test_repeated_bump_advances_source_and_still_validates_all_surfaces(self):
         self.configure()
         bump_release.apply(self.root, "1.2.4")
         for tags in (["1.2.3"], ["v1.2.3"], ["1.2.3", "v1.2.3", "2.0.0-rc.1"]):
             self.assertEqual(bump_release.next_version(self.root, "patch", tags=tags),
-                             {"version": "1.2.4", "tag": "1.2.4"})
+                             {"version": "1.2.5", "tag": "1.2.5"})
         contract = self.root / "tests/host/contract.json"
         contract.write_text(contract.read_text().replace('\\"version\\":\\"1.2.4\\"',
                                                          '\\"version\\":\\"1.2.3\\"'))
@@ -170,13 +170,13 @@ class BumpReleaseTests(unittest.TestCase):
             bump_release.next_version(self.root, "patch", tags=["v1.2.3"])
         self.assertEqual(before, self.snapshot())
 
-    def test_next_refuses_configured_version_ahead_of_computed_release(self):
+    def test_source_ahead_of_tags_is_the_bump_base(self):
         self.configure()
         bump_release.apply(self.root, "3.4.5")
         before = self.snapshot()
-        for mode in ("patch", "minor", "major"):
-            with self.subTest(mode=mode), self.assertRaisesRegex(ValueError, "ahead"):
-                bump_release.next_version(self.root, mode, tags=["v1.2.3"])
+        for mode, version in (("patch", "3.4.6"), ("minor", "3.5.0"), ("major", "4.0.0")):
+            with self.subTest(mode=mode):
+                self.assertEqual(bump_release.next_version(self.root, mode, tags=["v1.2.3"])["version"], version)
         self.assertEqual(before, self.snapshot())
 
     def test_empty_optional_feature_version_is_rejected_on_equal_retry(self):

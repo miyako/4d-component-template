@@ -26,12 +26,30 @@ Follow AGENTS.md for fixed free tool4d, licensing, packaging and optional signin
 Version signing policy defaults to unsigned; signed opt-in uses the implemented
 isolated signing/notarized-DMG path and must retest the exact final ZIP.
 Manual CI retains compiled ZIP/evidence without publication; releases verify
-the exact version-commit SHA and downloaded accepted asset hashes before
-creating the version tag and release. Keep exactly CI and manual main-only
-Publish workflows; Publish bumps patch/minor/major and commits synchronized
-metadata before building. Never initialize or publish the original template.
+the immutable dispatch `github.sha` and downloaded accepted asset hashes before
+creating the version tag and release. Keep CI plus two manual release-facing
+actions: **Bump version** (`bump-version.yml`) validates current version surfaces
+and commits only synchronized source metadata for patch/minor/major to the
+explicitly selected dispatch branch; no tags/builds/releases/workflow dispatch.
+`release_source.py bump` requires clean checkout at immutable dispatch SHA and
+selected branch remote HEAD exactly equal to it (fails if moved); it bumps
+max(current source, stable X.Y.Z/legacy v history), never reuses old candidates,
+stages bounded surfaces and non-force pushes only that branch.
+**Build** (`build.yml`) remains main-only, accepts only optional
+`require_apple_signing` (no version/tag/bump input), derives stable `X.Y.Z` from
+synchronized source metadata at that exact SHA, preflights clean/exact source,
+collisions and main ancestry before expensive CI. Nonmutating preflight requires
+main dispatch/HEAD exactly equal to `github.sha`, validates all version surfaces
+with `bump_release.plan` at that same version and requires source version to
+exceed stable published tag history. Main may advance, but Build never switches
+from dispatch SHA to newer main HEAD. It passes the same full SHA
+through reusable CI, acceptance and final publication. Preserve all package,
+compiler, runtime, provenance and signing gates; tag/release only after final
+asset acceptance, never clobber or tag-push publication.
+Never initialize or publish the original template.
 Component release tags must equal the prefix-free SemVer version (`0.1.0`,
-never `v0.1.0`); legacy prefixed tags are read-only migration baselines.
+never `v0.1.0`); this is not a plug-in tag rule.
+Legacy prefixed tags are read-only migration baselines.
 Follow4D host-aligned LTS/R tags are a distinct convention, not implied by
 ordinary component SemVer; see AGENTS.md and its official reference.
 Unsigned local acceptance needs no license activation or signing secrets.

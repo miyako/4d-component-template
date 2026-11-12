@@ -1,0 +1,39 @@
+name: Bump version
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Semantic source version increment
+        required: true
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bump-version-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned workflow validator dependency
+        run: python -m pip install -r tooling/requirements-workflow.txt
+      - name: Validate canonical workflow contract before version mutation
+        run: python scripts/workflow_contract.py
+      - name: Validate, bump and commit only version source metadata to the selected branch
+        env:
+          MODE: ${{ inputs.mode }}
+        run: python scripts/release_source.py --repository "$GITHUB_REPOSITORY" bump --mode "$MODE"

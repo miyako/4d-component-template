@@ -38,7 +38,7 @@ class WorkflowTests(unittest.TestCase):
     def test_description_and_formatting_changes_preserve_behavior(self):
         self.mutate("ci", lambda d: d["on"]["workflow_call"]["inputs"]["source_sha"].update(
             description="Exact source revision"))
-        self.mutate("publish", lambda d: d["on"]["workflow_dispatch"]["inputs"]["mode"].update(
+        self.mutate("bump-version", lambda d: d["on"]["workflow_dispatch"]["inputs"]["mode"].update(
             description="Choose increment"))
         self.mutate("ci", lambda d: next(
             step for step in d["jobs"]["native"]["steps"] if "test_cli.py" in step.get("run", "")
@@ -50,10 +50,11 @@ class WorkflowTests(unittest.TestCase):
             ("ci", "native", "test_cli.py"),
             ("ci", "native", "scripts/build_cli.py"),
             ("ci", "configuration", "scripts/workflow_contract.py"),
-            ("publish", "compile", "scripts/accept_hosted.py"),
-            ("publish", "version", "sign_release.py"),
-            ("publish", "version", "git commit"),
-            ("publish", "publish", "scripts/release_assets.py"),
+            ("build", "compile", "scripts/accept_hosted.py"),
+            ("build", "preflight", "sign_release.py"),
+            ("build", "preflight", "release_source.py"),
+            ("bump-version", "bump", "release_source.py"),
+            ("build", "publish", "scripts/release_assets.py"),
         ):
             path = self.root / ".github/workflows" / (name + ".yml")
             original = path.read_text()
@@ -69,7 +70,7 @@ class WorkflowTests(unittest.TestCase):
                     path.write_text(original)
 
     def test_main_guard_must_exit_not_only_mention_exit(self):
-        self.mutate("publish", lambda d: d["jobs"]["version"]["steps"][0].update(run="echo 'exit 1'"))
+        self.mutate("build", lambda d: d["jobs"]["preflight"]["steps"][0].update(run="echo 'exit 1'"))
         with self.assertRaisesRegex(ValueError, "main guard"):
             workflow_contract.validate(self.root)
 
@@ -99,25 +100,34 @@ class WorkflowTests(unittest.TestCase):
     def test_negative_dispatch_and_graph_mutations(self):
         cases = [
             ("ci", lambda d: d["on"].update(push={"tags": ["*"]})),
-            ("publish", lambda d: d["on"].update(push={"tags": ["*"]})),
-            ("publish", lambda d: d["on"]["workflow_dispatch"]["inputs"]["mode"].update(options=["patch"])),
-            ("publish", lambda d: d["jobs"]["version"]["steps"][0].update({"if": "false"})),
-            ("publish", lambda d: d["jobs"]["native"]["with"].update(source_sha="main")),
-            ("publish", lambda d: d["jobs"]["native"]["with"].update(release_call=False)),
-            ("publish", lambda d: d["jobs"]["compile"].update(needs=["version"])),
-            ("publish", lambda d: d["jobs"]["compile"].update({"if": "false"})),
+            ("build", lambda d: d["on"].update(push={"tags": ["*"]})),
+            ("bump-version", lambda d: d["on"].update(push={"tags": ["*"]})),
+            ("bump-version", lambda d: d["on"]["workflow_dispatch"]["inputs"]["mode"].update(options=["patch"])),
+            ("build", lambda d: d["on"]["workflow_dispatch"]["inputs"].update(version={"type": "string"})),
+            ("build", lambda d: d["jobs"]["preflight"]["steps"][0].update({"if": "false"})),
+            ("build", lambda d: d["jobs"]["native"]["with"].update(source_sha="main")),
+            ("build", lambda d: d["jobs"]["native"]["with"].update(release_call=False)),
+            ("build", lambda d: d["jobs"]["compile"].update(needs=["preflight"])),
+            ("build", lambda d: d["jobs"]["publish"].update(needs=["preflight"])),
+            ("build", lambda d: d["jobs"]["preflight"]["outputs"].update(source_sha="main")),
+            ("bump-version", lambda d: d["jobs"]["bump"]["steps"][0]["with"].update(ref="main")),
+            ("build", lambda d: d["jobs"]["compile"].update({"if": "false"})),
             ("ci", lambda d: d.update(permissions={"contents": "write"})),
             ("ci", lambda d: d["jobs"]["native"].update({"continue-on-error": True})),
             ("ci", lambda d: d["jobs"]["native"].update({"runs-on": "ubuntu-24.04"})),
             ("ci", lambda d: next(s for s in d["jobs"]["native"]["steps"]
                                 if "test_cli.py" in s.get("run", "")).update({"if": "false"})),
-            ("publish", lambda d: d["jobs"]["compile"]["env"].update(RELEASE_SHA="main")),
-            ("publish", lambda d: d["jobs"]["compile"].update(env={"LEAK": "${{ secrets.KEYCHAIN_PASSWORD }}"})),
+            ("build", lambda d: d["jobs"]["compile"]["env"].update(RELEASE_SHA="main")),
+            ("build", lambda d: d["jobs"]["compile"].update(env={"LEAK": "${{ secrets.KEYCHAIN_PASSWORD }}"})),
+            ("build", lambda d: d["jobs"]["preflight"].update(permissions={"contents": "write"})),
+            ("build", lambda d: d["jobs"]["preflight"]["steps"].append({"run": "git push origin HEAD:main"})),
+            ("bump-version", lambda d: d["jobs"]["bump"]["steps"].append({"run": "gh workflow run build.yml"})),
+            ("bump-version", lambda d: d["jobs"]["bump"]["steps"].append({"run": "python scripts/build_cli.py"})),
             ("ci", lambda d: d["jobs"]["configuration"]["steps"].append({"run": "gh secret set NAME"})),
             ("ci", lambda d: d["jobs"]["configuration"]["steps"].append({"run": "gh release create 1.0.0"})),
         ]
         original = {name: (self.root / ".github/workflows" / (name + ".yml")).read_text()
-                    for name in ("ci", "publish")}
+                    for name in ("ci", "build", "bump-version")}
         for name, action in cases:
             with self.subTest(action=action):
                 self.mutate(name, action)
@@ -126,10 +136,11 @@ class WorkflowTests(unittest.TestCase):
                 (self.root / ".github/workflows" / (name + ".yml")).write_text(original[name])
 
     def test_wrong_checkout_omitted_helper_artifact_and_secret_gate_fail(self):
-        path = self.root / ".github/workflows/publish.yml"
+        path = self.root / ".github/workflows/build.yml"
         original = path.read_text()
         for before, after in (
-            ("ref: ${{ needs.version.outputs.source_sha }}", "ref: main"),
+            ("ref: ${{ needs.preflight.outputs.source_sha }}", "ref: main"),
+            ("ref: ${{ github.sha }}", "ref: main"),
             ("--create-tag --publish", "--publish"),
             ("apple_signing == 'true'", "apple_signing == 'false'"),
             ("name: compiled-release", "name: unvalidated-release"),

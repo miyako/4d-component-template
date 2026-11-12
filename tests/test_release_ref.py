@@ -31,37 +31,15 @@ class ReleaseRefTests(unittest.TestCase):
         return subprocess.run(["git", *args], cwd=self.root, check=True,
                               capture_output=True, text=True, encoding="utf-8").stdout.strip()
 
-    def resolve(self, **args):
-        defaults = {"event": "workflow_dispatch", "version_tag": "0.1.0"}
-        defaults.update(args)
-        return release_ref.resolve(self.root, **defaults)
-
-    def test_manual_branch_resolves_existing_tag_not_selected_branch(self):
-        self.git("commit", "-q", "--allow-empty", "-m", "branch advanced")
-        metadata = self.resolve(ref_type="branch", ref_name="main",
-                                event_sha=self.git("rev-parse", "HEAD"))
-        self.assertEqual(metadata, {"tag": "0.1.0", "sha": self.sha})
-
-    def test_push_tag_requires_event_commit(self):
-        self.assertEqual(self.resolve(event="push", ref_type="tag", ref_name="0.1.0",
-                                      event_sha=self.sha),
-                         {"tag": "0.1.0", "sha": self.sha})
-
-    def test_push_branch_and_unsupported_events_fail(self):
-        for args in ({"event": "push", "ref_type": "branch"},
-                     {"event": "pull_request"}, {"event": "workflow_call"}):
-            with self.subTest(args=args), self.assertRaises(ValueError):
-                self.resolve(**args)
-
     def test_annotated_tag_peels_to_commit(self):
         self.git("tag", "-a", "0.2.0", "-m", "annotated")
         self.assertNotEqual(self.git("rev-parse", "refs/tags/0.2.0"), self.sha)
-        self.assertEqual(self.resolve(version_tag="0.2.0")["sha"], self.sha)
+        self.assertEqual(release_ref.tag_commit(self.root, "0.2.0"), self.sha)
 
     def test_semver_prerelease_and_build_metadata(self):
         tag = "1.2.3-rc.1+build-4"
         self.git("tag", tag)
-        self.assertEqual(self.resolve(version_tag=tag)["sha"], self.sha)
+        self.assertEqual(release_ref.tag_commit(self.root, tag), self.sha)
 
     def test_malformed_and_arbitrary_refs_rejected_before_git(self):
         for tag in ("", "main", "v0.1.0", "v1.2.3-rc.1", "20R3.2",
@@ -70,19 +48,19 @@ class ReleaseRefTests(unittest.TestCase):
                     "--help", "1.2.3;echo x", "v١.2.3", None):
             with self.subTest(tag=tag), patch.object(release_ref.subprocess, "run") as run:
                 with self.assertRaises(ValueError):
-                    self.resolve(version_tag=tag)
+                    release_ref.tag_commit(self.root, tag)
                 run.assert_not_called()
 
     def test_missing_tag_fails(self):
         with self.assertRaisesRegex(ValueError, "already exist"):
-            self.resolve(version_tag="9.9.9")
+            release_ref.tag_commit(self.root, "9.9.9")
 
     def test_tag_pointing_at_blob_fails(self):
         (self.root / "blob").write_text("not a commit", encoding="utf-8")
         blob = self.git("hash-object", "-w", "blob")
         self.git("tag", "0.3.0", blob)
         with self.assertRaisesRegex(ValueError, "point to a commit"):
-            self.resolve(version_tag="0.3.0")
+            release_ref.tag_commit(self.root, "0.3.0")
 
     def test_verify_expected_commit_and_invalid_sha(self):
         self.assertEqual(release_ref.verify(self.root, "0.1.0", self.sha), self.sha)
@@ -95,9 +73,6 @@ class ReleaseRefTests(unittest.TestCase):
         self.git("tag", "-f", "0.1.0")
         with self.assertRaisesRegex(ValueError, "moved"):
             release_ref.verify(self.root, "0.1.0", self.sha)
-        with self.assertRaisesRegex(ValueError, "moved"):
-            self.resolve(event="push", ref_type="tag", ref_name="0.1.0",
-                         event_sha=self.sha)
 
     def test_deleted_tag_fails_publish(self):
         self.git("tag", "-d", "0.1.0")
@@ -113,26 +88,21 @@ class ReleaseRefTests(unittest.TestCase):
                              ["git", "rev-parse", "--verify", "refs/tags/0.1.0^{commit}"])
             self.assertNotIn("shell", run.call_args.kwargs)
 
-    def test_cli_outputs_only_validated_single_line_metadata(self):
-        output = self.root / "github-output"
-        output.write_text("previous=step\n", encoding="utf-8")
+    def test_cli_verifies_exact_existing_tag(self):
         result = subprocess.run(
             [sys.executable, str(ROOT / "scripts/release_ref.py"), "--root", str(self.root),
-             "resolve", "--event", "workflow_dispatch", "--version-tag", "0.1.0"],
-            env={**os.environ, "GITHUB_OUTPUT": str(output)}, capture_output=True,
+             "verify", "--tag", "0.1.0", "--expected-sha", self.sha], capture_output=True,
             text=True, encoding="utf-8")
         self.assertEqual(result.returncode, 0, result.stderr)
-        expected = f"tag=0.1.0\nsha={self.sha}\n"
-        self.assertEqual(result.stdout, expected)
+        self.assertIn("expected commit", result.stdout)
         self.assertEqual(result.stderr, "")
-        self.assertEqual(output.read_text(encoding="utf-8"), "previous=step\n" + expected)
 
     def test_cli_failure_leaves_metadata_unchanged(self):
         output = self.root / "github-output"
         output.write_text("previous=step\n", encoding="utf-8")
         result = subprocess.run(
             [sys.executable, str(ROOT / "scripts/release_ref.py"), "--root", str(self.root),
-             "resolve", "--event", "workflow_dispatch", "--version-tag", "9.9.9"],
+             "verify", "--tag", "9.9.9", "--expected-sha", self.sha],
             env={**os.environ, "GITHUB_OUTPUT": str(output)}, capture_output=True,
             text=True, encoding="utf-8")
         self.assertEqual(result.returncode, 1)
@@ -147,38 +117,43 @@ class ReleaseRefTests(unittest.TestCase):
             with self.subTest(tag=tag), self.assertRaisesRegex(ValueError, "template.json version"):
                 ci_config.load_config(ROOT, tag=tag)
 
-    def test_only_ci_and_publish_with_main_only_version_and_exact_sha_builds(self):
+    def test_separate_source_bump_and_main_only_immutable_build(self):
         ci = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
-        release = (ROOT / ".github/workflows/publish.yml").read_text(encoding="utf-8")
+        release = (ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
+        bump = (ROOT / ".github/workflows/bump-version.yml").read_text(encoding="utf-8")
         self.assertEqual(sorted(path.name for path in (ROOT / ".github/workflows").iterdir()),
-                         ["ci.yml", "publish.yml"])
+                         ["build.yml", "bump-version.yml", "ci.yml"])
         self.assertTrue(ci.startswith("name: CI\n"))
-        self.assertTrue(release.startswith("name: Publish\n"))
+        self.assertTrue(release.startswith("name: Build\n"))
+        self.assertTrue(bump.startswith("name: Bump version\n"))
         self.assertIn("branches: ['**']", ci)
         self.assertNotIn("  push:", release)
         self.assertNotIn("version_tag:", release)
-        self.assertIn("options: [patch, minor, major]", release)
-        self.assertIn("default: patch", release)
+        self.assertNotIn("mode:", release)
+        self.assertIn("options: [patch, minor, major]", bump)
+        self.assertIn("default: patch", bump)
         self.assertIn("group: publish\n  cancel-in-progress: false", release)
         self.assertIn("if: github.ref != 'refs/heads/main'", release)
-        self.assertIn("ref: main", release)
-        self.assertIn("bump_release.py apply", release)
-        self.assertIn("release_tag: ${{ steps.version.outputs.tag }}", release)
-        self.assertIn('scripts/bump_release.py next --mode "$MODE"', release)
-        self.assertNotIn('v${{ steps.version.outputs', release)
-        self.assertIn("--stage", release)
-        self.assertIn("git push origin HEAD:refs/heads/main", release)
-        self.assertLess(release.index("release_ref.py available"), release.index("git commit"))
-        self.assertEqual(release.count("contents: write"), 2)
+        self.assertIn("ref: ${{ github.sha }}", release)
+        self.assertNotIn("bump_release.py", release)
+        self.assertIn("release_tag: ${{ steps.source.outputs.release_tag }}", release)
+        self.assertIn('scripts/release_source.py --repository "$GITHUB_REPOSITORY" bump --mode "$MODE"', bump)
+        self.assertNotIn('v${{ steps.source.outputs', release)
+        self.assertNotIn("git commit", release)
+        self.assertNotIn("git push", release)
+        self.assertEqual(release.count("contents: write"), 1)
+        self.assertEqual(bump.count("contents: write"), 1)
+        self.assertNotIn("scripts/release_assets.py", bump)
+        self.assertNotIn("workflow run", bump)
         self.assertEqual(ci.count("uses: actions/checkout@v4"), 3)
         self.assertEqual(ci.count("ref: ${{ inputs.source_sha || github.sha }}"), 3)
         self.assertEqual(ci.count("&& !inputs.release_call"), 4)
         self.assertIn("workflow_dispatch:", ci)
         self.assertIn("workflow_dispatch:", release)
         self.assertIn("fetch-depth: 0", release)
-        self.assertIn("source_sha: ${{ needs.version.outputs.source_sha }}", release)
+        self.assertIn("source_sha: ${{ needs.preflight.outputs.source_sha }}", release)
         self.assertIn("release_call: true", release)
-        self.assertEqual(release.count("ref: ${{ needs.version.outputs.source_sha }}"), 2)
+        self.assertEqual(release.count("ref: ${{ needs.preflight.outputs.source_sha }}"), 2)
         self.assertEqual(release.count('validate --release --tag "$RELEASE_TAG"'), 2)
         self.assertIn('--tool4d .tools/tool4d.app/Contents/MacOS/tool4d --tag "$RELEASE_TAG"', release)
         self.assertIn("--create-tag --publish", release)

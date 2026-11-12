@@ -221,7 +221,7 @@ class ReleaseAssetsTests(unittest.TestCase):
         self.assertNotIn("*.zip", arguments)
 
     def test_release_secret_gate_and_manual_escalation_are_explicit(self):
-        workflow = (ROOT / ".github/workflows/publish.yml").read_text()
+        workflow = (ROOT / ".github/workflows/build.yml").read_text()
         unsigned = workflow.split("name: Build and accept unsigned component without Apple secrets")[1].split(
             "name: Sign, notarize, staple")[0]
         self.assertIn("apple_signing == 'false'", unsigned)
@@ -244,6 +244,24 @@ class ReleaseAssetsTests(unittest.TestCase):
             release_assets.publish(self.root, "owner/example-component", "0.1.0",
                                    self.revision, create_tag=True)
         self.assertEqual(order, ["assets", "tag", "release"])
+
+    def test_failed_or_unexecuted_acceptance_never_mutates_refs_or_releases(self):
+        baseline = copy.deepcopy(self.report)
+        for check in ("assembly", "package", "compile", "source_host", "compiled_host",
+                      "cli_test_macos-x64", "cli_test_macos-arm64", "cli_test_windows-x64"):
+            for status in ("failed", "not_run"):
+                self.report = copy.deepcopy(baseline)
+                self.report["steps"][check]["status"] = status
+                self.save()
+                with self.subTest(check=check, status=status), patch.object(
+                        release_assets, "commit", return_value=self.revision), patch.object(
+                        release_assets, "create_release_tag") as tag, patch.object(
+                        release_assets.subprocess, "run") as run:
+                    with self.assertRaisesRegex(ValueError, "did not pass"):
+                        release_assets.publish(self.root, "owner/example-component", "0.1.0",
+                                               self.revision, create_tag=True)
+                    tag.assert_not_called()
+                    run.assert_not_called()
 
     def test_invalid_assets_or_tag_collision_never_create_release(self):
         with patch.object(release_assets, "verify_assets", side_effect=ValueError("asset mismatch")), patch.object(

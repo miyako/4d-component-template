@@ -80,19 +80,37 @@ or packaging; do not turn an SDK requirement into a component resource.
    `NOTARYTOOL_TEAM_ID`; optional `CODESIGN_APPLE_ID` only pins it), signs an isolated copy, notarizes/staples its DMG, repacks
    the ZIP from the final mounted DMG and reruns exact final ZIP compiled-host
    acceptance. Missing credentials or signing errors never downgrade to unsigned.
-   Keep exactly CI and Publish workflows. Manual Publish on main accepts
-   patch/minor/major (default patch), bumps from the highest stable prefix-free
-   `X.Y.Z` tag (also reading legacy `vX.Y.Z` tags only as migration baselines, or
-   the configured version when none exists), synchronizes version metadata/contracts/
-   docs and commits to main. Build/test that exact SHA through reusable CI.
-   Downloaded asset/hash/host-evidence and collision checks precede new tag/release
-   creation. Do not precreate tags or enable tag-push publication.
+   Keep CI nonpublishing plus two manual release-facing actions: **Bump version**
+   in `bump-version.yml` and **Build** in `build.yml`. Bump version accepts
+   patch/minor/major (default patch). `release_source.py bump` validates immutable
+   dispatch SHA, clean checkout, current version surfaces and selected branch
+   remote HEAD exactly equal to dispatch SHA (fails if moved). It increments the
+   greater of current authoritative source version and stable `X.Y.Z`/legacy
+   `vX.Y.Z` history, or source alone without stable history; each Bump increments
+   source, never reusing an old retry candidate. It synchronizes version metadata/contracts/
+   docs and commits only synchronized source metadata to the explicitly selected
+   dispatch branch, staging bounded surfaces and non-force pushing only that
+   branch. It performs no builds, tags, releases or workflow dispatch.
+   Separately authorized Build remains main-only and accepts only optional
+   `require_apple_signing`, never version/tag/bump/mode input. It checks out
+   immutable dispatch `github.sha`, derives stable prefix-free `X.Y.Z` from
+   synchronized source metadata. Before expensive reusable CI, nonmutating
+   `release_source.py` preflight requires main dispatch/HEAD exactly equal to
+   `github.sha`, clean/exact source, all version surfaces validated with
+   `bump_release.plan` at the same version, source version greater than stable
+   published tag history, no collisions and main ancestry. Main may advance
+   later, but source stays at dispatch SHA, never newer main HEAD. Pass that same full SHA
+   through CI, acceptance and final publication, preserving every package,
+   compiler, runtime, provenance and signing gate. Downloaded asset/hash/
+   final-host acceptance precedes tag/release creation; recheck collisions and
+   ancestry before publication. Never clobber, precreate tags or enable tag-push
+   publication. Build does not bump or commit source metadata.
 
 ## Canonical generated workflow contract
 
 Before initialization or workflow tests, install the pinned development-only
 `tooling/requirements-workflow.txt` in a Python environment and run
-`python3 scripts/workflow_contract.py --root .`. Initialization and CI/Publish
+`python3 scripts/workflow_contract.py --root .`. Initialization, CI, Bump version and Build
 enforce the inherited workflows. Use `workflow-contract.json` only for supported
 configuration; see [the extension contract](../../../AGENTS.md#enforced-generated-contract-and-bounded-configuration).
 Follow [the release entry points and handoff rules](../../../AGENTS.md#release-entry-points-handoff-and-bounded-waiting)
@@ -105,7 +123,7 @@ For optional signed-release credential setup, follow the canonical
 Inspect the actual destination workflow first: unsigned/Windows-only workflows
 may need no Apple secrets. The bundled
 [scripts/set-release-secrets.sh](../../../scripts/set-release-secrets.sh)
-is **user-run only** and sets the six required secrets. Signed Publish infers
+is **user-run only** and sets the six required secrets. Signed Build infers
 the signing identity from the imported certificate; `CODESIGN_APPLE_ID` is an
 optional pin (identity or SHA-1 fingerprint, not email). Agents must not execute the helper or real Keychain/secret operations,
 read values, choose certificates or ask for secrets in chat; only
@@ -115,12 +133,13 @@ Setup never authorizes publication or changes the unsigned-default policy.
 ## Component release versions and tags
 
 New component release tags must equal the prefix-free SemVer version:
-`0.1.0`, never `v0.1.0`. Publish emits stable `X.Y.Z`; package validation,
+`0.1.0`, never `v0.1.0`. Build publishes stable `X.Y.Z`; package validation,
 signing proofs and publication reject a `v` prefix. Do not rename/delete/move
 published history or automatically alias old tags/releases; legacy stable tags
 are read only to avoid downgrades. New builds need fresh acceptance evidence
 and unchanged exact-version signing policy gates. Upstream Actions/toolchain
 tags and historical external URLs are not component-tag rewrite targets.
+This component rule is not a native 4D plug-in tag convention.
 
 The official [Follow 4D version guide](https://blog.4d.com/follow-4d-version-a-smarter-way-to-manage-your-dependencies/)
 requires **host-version-aligned** LTS `x.y.p` (e.g. `20.2.3`) or R-release

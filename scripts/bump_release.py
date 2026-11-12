@@ -271,6 +271,7 @@ def plan(root, version, repository=None):
 
 
 def next_version(root, mode, repository=None, *, tags=None):
+    """Increment the higher of synchronized source and stable release history."""
     config, _ = plan(root, configuration(Path(root).resolve(), repository)["version"], repository)
     if mode not in ("patch", "minor", "major"):
         raise ValueError("mode must be patch, minor, or major")
@@ -282,12 +283,10 @@ def next_version(root, mode, repository=None, *, tags=None):
         raise ValueError("tags must be a list of tag names")
     releases = [stable(tag.removeprefix("v")) for tag in tags
                 if re.fullmatch("v?" + STABLE, tag)]
-    base = max(releases) if releases else stable(config["version"])
+    base = max([stable(config["version"]), *releases])
     major, minor, patch = base
     value = {"patch": (major, minor, patch + 1), "minor": (major, minor + 1, 0),
              "major": (major + 1, 0, 0)}[mode]
-    if stable(config["version"]) > value:
-        raise ValueError("configured version is ahead of the next stable release; refusing a downgrade")
     version = ".".join(map(str, value))
     return {"version": version, "tag": version}
 
