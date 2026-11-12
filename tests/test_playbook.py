@@ -54,7 +54,7 @@ class PlaybookTests(unittest.TestCase):
         self.assertIn('"tag": "0.1.0"', (ROOT / "README.md").read_text())
 
     def test_credential_setup_matches_optional_signed_workflow(self):
-        workflow = (ROOT / ".github/workflows/publish.yml").read_text()
+        workflow = (ROOT / ".github/workflows/build.yml").read_text()
         names = set(re.findall(r"secrets\.([A-Z_]+)", workflow))
         self.assertEqual(names, {
             "APPLE_DEVELOPER_ID_CERTIFICATE", "APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD",

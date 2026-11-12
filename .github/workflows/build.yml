@@ -1,13 +1,7 @@
-name: Publish
+name: Build
 on:
   workflow_dispatch:
     inputs:
-      mode:
-        description: Semantic version increment
-        required: true
-        type: choice
-        options: [patch, minor, major]
-        default: patch
       require_apple_signing:
         description: Require Apple signing even when the version policy is unsigned
         required: false
@@ -22,50 +16,39 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  version:
+  preflight:
     runs-on: ubuntu-24.04
-    permissions:
-      contents: write
     outputs:
-      source_sha: ${{ steps.commit.outputs.sha }}
-      release_tag: ${{ steps.version.outputs.tag }}
+      source_sha: ${{ steps.source.outputs.source_sha }}
+      release_tag: ${{ steps.source.outputs.release_tag }}
       apple_signing: ${{ steps.signing_policy.outputs.apple_signing }}
     steps:
       - name: Require manual publication from main
         if: github.ref != 'refs/heads/main'
         run: |
-          echo "Publish must be run on main." >&2
+          echo "Build must be run on main." >&2
           exit 1
       - uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ github.sha }}
           fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
       - name: Install pinned workflow validator dependency
         run: python -m pip install -r tooling/requirements-workflow.txt
-      - name: Validate canonical workflow contract before version mutation
+      - name: Validate canonical workflow contract before building
         run: python scripts/workflow_contract.py
-      - name: Compute prefix-free release tag from stable history (including legacy v tags)
-        id: version
+      - name: Validate immutable source version, main ancestry and release availability before builds
+        id: source
         env:
-          MODE: ${{ inputs.mode }}
-        run: python scripts/bump_release.py next --mode "$MODE"
-      - name: Synchronize version metadata and stage only validated version changes
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-        run: python scripts/bump_release.py apply --version "$VERSION" --stage
+          GH_TOKEN: ${{ github.token }}
+        run: python scripts/release_source.py --repository "$GITHUB_REPOSITORY" preflight
       - name: Require initialized matching repository, version and explicit 4D opt-in
         env:
           FOURD_ENABLED: ${{ vars.FOURD_ENABLED }}
-          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+          RELEASE_TAG: ${{ steps.source.outputs.release_tag }}
         run: python scripts/ci_config.py validate --release --tag "$RELEASE_TAG"
-      - name: Reject existing release tags or GitHub releases before committing
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ steps.version.outputs.tag }}
-        run: python scripts/release_ref.py available --repository "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG"
       - name: Resolve version signing policy without accessing secrets
         id: signing_policy
         env:
@@ -77,39 +60,27 @@ jobs:
           if os.environ["REQUIRE_APPLE_SIGNING"] == "true":
               arguments.append("--require-apple-signing")
           subprocess.run(arguments, check=True)
-      - name: Commit version updates to main and record the exact build SHA
-        id: commit
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          if ! git diff --cached --quiet; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git commit -m "Release $VERSION"
-            git push origin HEAD:refs/heads/main
-          fi
-          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
   native:
-    needs: version
+    needs: preflight
     uses: ./.github/workflows/ci.yml
     with:
-      source_sha: ${{ needs.version.outputs.source_sha }}
+      source_sha: ${{ needs.preflight.outputs.source_sha }}
       release_call: true
 
   compile:
-    needs: [version, native]
+    needs: [preflight, native]
     runs-on: macos-15
     env:
       FOURD_ENABLED: ${{ vars.FOURD_ENABLED }}
       TOOL4D_URL: ${{ vars.TOOL4D_URL }}
       TOOL4D_SHA256: ${{ vars.TOOL4D_SHA256 }}
-      RELEASE_TAG: ${{ needs.version.outputs.release_tag }}
-      RELEASE_SHA: ${{ needs.version.outputs.source_sha }}
+      RELEASE_TAG: ${{ needs.preflight.outputs.release_tag }}
+      RELEASE_SHA: ${{ needs.preflight.outputs.source_sha }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.version.outputs.source_sha }}
+          ref: ${{ needs.preflight.outputs.source_sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -129,12 +100,12 @@ jobs:
       - name: Download SHA-256-verified tool4D
         run: python scripts/ci_config.py download-tool4d
       - name: Build and accept unsigned component without Apple secrets
-        if: needs.version.outputs.apple_signing == 'false'
+        if: needs.preflight.outputs.apple_signing == 'false'
         run: >-
           python scripts/accept_hosted.py --repository "$GITHUB_REPOSITORY"
           --tool4d .tools/tool4d.app/Contents/MacOS/tool4d --tag "$RELEASE_TAG"
       - name: Sign, notarize, staple and accept the exact final ZIP
-        if: needs.version.outputs.apple_signing == 'true'
+        if: needs.preflight.outputs.apple_signing == 'true'
         env:
           APPLE_DEVELOPER_ID_CERTIFICATE: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE }}
           APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD }}
@@ -173,14 +144,14 @@ jobs:
           retention-days: 30
 
   publish:
-    needs: [version, compile]
+    needs: [preflight, compile]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.version.outputs.source_sha }}
+          ref: ${{ needs.preflight.outputs.source_sha }}
           fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
@@ -193,9 +164,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ needs.version.outputs.release_tag }}
-          RELEASE_SHA: ${{ needs.version.outputs.source_sha }}
-          APPLE_SIGNING: ${{ needs.version.outputs.apple_signing }}
+          RELEASE_TAG: ${{ needs.preflight.outputs.release_tag }}
+          RELEASE_SHA: ${{ needs.preflight.outputs.source_sha }}
+          APPLE_SIGNING: ${{ needs.preflight.outputs.apple_signing }}
         run: |
           signing=()
           if [ "$APPLE_SIGNING" = "true" ]; then signing+=(--require-apple-signing); fi

@@ -48,7 +48,8 @@ class InitializerTests(unittest.TestCase):
                                  (self.root / "release-policy.json").read_bytes())
                 from workflow_contract import validate as validate_workflows
                 self.assertEqual(validate_workflows(destination)["status"], "passed")
-                for path in (".github/workflows/ci.yml", ".github/workflows/publish.yml",
+                for path in (".github/workflows/ci.yml", ".github/workflows/bump-version.yml",
+                             ".github/workflows/build.yml",
                              "workflow-contract.json", "scripts/workflow_contract.py"):
                     self.assertEqual((destination / path).read_bytes(), (self.root / path).read_bytes())
                 self.assertTrue(config["initialized"])

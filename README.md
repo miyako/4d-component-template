@@ -232,8 +232,9 @@ install an isolated copy under `Components/` to test actual component loading.
 
 Use **prefix-free component versions and tags**: `0.1.0`, not `v0.1.0`.
 The version in `template.json`/`package.json`, new release tag and signing proof
-must agree exactly. Publish generates stable `X.Y.Z` tags; a GitHub release
+must agree exactly. Build publishes stable `X.Y.Z` tags; a GitHub release
 display title cannot repair a prefixed or otherwise incompatible tag.
+This component release rule is not a native 4D plug-in tag convention.
 
 The official [Follow 4D version guide](https://blog.4d.com/follow-4d-version-a-smarter-way-to-manage-your-dependencies/)
 describes a separate **host-version-aligned** rule: LTS tags `x.y.p` (e.g.
@@ -331,11 +332,11 @@ approved public compiler pin is already in `package.json.tool`.
 | `TOOL4D_SHA256` | Optional paired override: `40a5d177a4f73165f52abf6ec8000249d81411c41353ccf258cece8e74639261`; verify the approved archive hash out of band |
 
 Supply URL/hash overrides together or neither; incomplete pairs fail.
-GitHub automatically supplies `GITHUB_TOKEN`; only Publish's version and
-publication jobs receive `contents: write`. Do not register it or a personal
-token as another secret. Repository rules must permit the workflow bot's
-non-force version commit to `main`; a protected-branch rejection stops Publish
-without bypassing those rules.
+GitHub automatically supplies `GITHUB_TOKEN`; only Bump version's source commit
+and Build's publication jobs receive `contents: write`. Do not register it or a
+personal token as another secret. Repository rules must permit the workflow bot's
+non-force version commit to the explicitly selected branch; a protected-branch
+rejection stops Bump version without bypassing those rules.
 None of these variables or the automatic token enables signing.
 
 Reference URL form:
@@ -386,14 +387,17 @@ Native Libraries and CompiledCode are required, not source-shaped substitutes.
 The compile marker binds inputs with `input_sha256` and generated
 DerivedData/Libraries with `output_sha256`, rejecting changed outputs at packaging.
 
-Publish synchronizes the configured component/CLI version and contracts,
-commits the version update to `main` and builds all CLI targets from that exact
-commit. It compiles after Resources assembly, packs `REPOSITORY.zip`,
+Bump version synchronizes source version metadata in a separate source-only
+commit. Build derives the stable version from synchronized source metadata at
+the immutable dispatch `github.sha` on main and builds all CLI targets from that
+exact full SHA. It never bumps the version or commits source. It compiles after
+Resources assembly, packs `REPOSITORY.zip`,
 and **loads the unpacked compiled package in a real 4D host before publishing**.
 Uninitialized/misnamed projects, missing tool/binary/library, failed compile or
 failed host test fail closed. Only after downloaded assets pass verification
 does it create the prefix-free `<version>` tag and the GitHub release. Built-in `GITHUB_TOKEN`
-performs the version commit, tag and release; no personal token is needed.
+performs the separately authorized source commit and final tag/release operations;
+no personal token is needed.
 
 ```text
 REPOSITORY.zip
@@ -445,26 +449,51 @@ It requires `execution:"passed"` in each verified native manifest, reassembles
 resources, source-tests, compiles, packs and compiled-host-tests before saving
 stable evidence. Cross-only manifests are not hosted native evidence.
 
-There are exactly two workflows: **CI** and **Publish**. Open
-**Actions → Publish → Run workflow**, select **main**, and choose **mode**:
-**patch** (default), **minor** or **major**. No tag needs to exist first.
-Publish uses the highest stable `X.Y.Z` tag as its version base, also reading
-legacy `vX.Y.Z` tags only as migration baselines (not tag dates; prerelease and
-build-metadata tags are ignored). With no stable tag, it bumps the configured
-version: for `0.1.0`, patch gives `0.1.1`, minor `0.2.0`, major `1.0.0`.
+There are three workflows: nonpublishing **CI** (`ci.yml`) and two manual
+release-facing actions, **Bump version** (`bump-version.yml`) and **Build**
+(`build.yml`). They deliberately separate source version changes from publication.
+
+Open **Actions → Bump version → Run workflow**, explicitly select the branch
+to receive the commit, and choose **mode**: **patch** (default), **minor** or
+**major**. Bump version is not main-only. `scripts/release_source.py bump`
+validates immutable dispatch SHA, clean checkout and all current version
+surfaces before writes. The selected branch's current remote HEAD must exactly
+equal that dispatch SHA; if it moved, Bump fails rather than switching revisions.
+It stages bounded surfaces, commits only synchronized source metadata and
+non-force pushes only the selected dispatch branch. It creates no tags, builds,
+releases or workflow dispatch and does not automatically start Build.
+Its `next_version` call uses the greater of current authoritative source version
+and the highest stable `X.Y.Z`/legacy `vX.Y.Z` history as its base (not tag dates;
+prerelease and build-metadata tags are ignored). With no stable tag, it bumps
+source alone: for `0.1.0`, patch gives `0.1.1`, minor `0.2.0`, major `1.0.0`.
+Every successful Bump increments source; it never reuses an old retry candidate.
 Malformed/inconsistent metadata or a proposed downgrade fails before committing.
 The generic version helper updates package/template metadata, selected-language
 version declarations, version contracts and current CLI/class documentation
 without rewriting unrelated dependency or historical versions.
 
-Publish serializes runs (`publish`, no cancellation), rejects non-main dispatches
-and existing tag/release collisions, commits version changes to `main`, and passes
-the resulting full commit SHA to reusable CI and every package/sign/publish job.
+After that source version is on main, separately authorize
+**Actions → Build → Run workflow** on **main**. Its only input is the optional
+**require_apple_signing** checkbox: there is no version, tag, bump or mode input.
+Build checks out the immutable full `github.sha` selected at dispatch, not a
+later branch HEAD, and derives stable prefix-free `X.Y.Z` from synchronized
+source metadata. Before expensive reusable CI, `release_source.py` preflight
+requires a main dispatch and checkout HEAD exactly equal to `github.sha`,
+validates clean/exact source and all version surfaces using `bump_release.plan`
+at that same version, requires source version to exceed stable published
+`X.Y.Z`/legacy `vX.Y.Z` history, and checks tag/release collisions and main
+ancestry. Preflight refreshes remote-tracking refs but mutates no source or release.
+Main may advance afterward, but Build's
+source SHA remains the dispatch SHA, never the newer main HEAD; that SHA must
+remain in main's history. Build retains main-only publication and passes the same full SHA to
+reusable CI, acceptance and every assembly/compiler/signing/publication checkout.
+All existing package, compiler, runtime, provenance and signing checks remain
+mandatory; source version derivation never substitutes for artifact acceptance.
 CI runs on branch pushes, PRs and manual requests, not tag pushes; the bot's
-`GITHUB_TOKEN` commit does not trigger a recursive CI run. Publish calls CI
+`GITHUB_TOKEN` source-version commit does not trigger a recursive CI run. Build calls CI
 explicitly and performs mandatory 4D acceptance separately, without duplicating
 CI's optional compiled-package inspection.
-Signing policy is read from the version commit. The optional
+Signing policy is read from that immutable dispatch SHA. The optional
 **require_apple_signing** checkbox escalates an unsigned version to signed;
 leaving it unchecked never downgrades a policy-required signed version.
 Do not dispatch publication or create tags without approval. Merely opening
@@ -476,7 +505,7 @@ template; the workflow file must first merge.
 **Unsigned is the default; signing is implemented and opt-in.**
 `release-policy.json` has `schema:1` and an initially empty
 `apple_notarized_versions` array. To require signing for a component release,
-commit its exact next version (without `v`) before running Publish:
+commit its exact intended version (without `v`) before running Build:
 
 ```json
 {"schema":1,"apple_notarized_versions":["0.1.0"]}
@@ -520,9 +549,9 @@ Keep public build configuration separate under **Actions → Variables**:
 tool4d build and archive SHA256 are already pinned in `package.json.tool`;
 `TOOL4D_URL` and `TOOL4D_SHA256` are **optional paired overrides**, not required
 secrets. Supply both or neither; incomplete/invalid overrides fail.
-GitHub supplies `GITHUB_TOKEN` automatically; only Publish's version and
-publication jobs grant it `contents: write`. Do not register a personal token
-for this workflow.
+GitHub supplies `GITHUB_TOKEN` automatically; only Bump version's source commit
+and Build's publication jobs grant it `contents: write`. Do not register a
+personal token for these workflows.
 
 The implemented `scripts/sign_release.py` validates all credentials before
 signing and requires the checkout to equal the resolved release SHA. It
@@ -574,19 +603,25 @@ Commit the feature, notices and pinned dependencies. Set the generated
 repository's **FOURD_ENABLED=true** variable; choose unsigned policy or commit
 a signed version and register its six secrets. Run **CI → Run workflow** to
 inspect the compiled ZIP/evidence without publication. After approval, run
-**Publish → Run workflow** on **main**, selecting patch/minor/major and optional
-signing escalation. It bumps and commits the version, builds/tests that exact
-SHA, and creates the tag/release only after all required gates pass. Download
+**Bump version → Run workflow**, explicitly selecting the destination branch
+and patch/minor/major. It validates and commits synchronized source metadata
+only; merge that commit to main if needed. Separately authorize
+**Build → Run workflow** on **main**, with only optional signing escalation.
+Build derives the version from synchronized source at immutable dispatch
+`github.sha`, preflights source/collisions/main ancestry, and builds/tests that
+same full SHA through CI, acceptance and publication. It creates the tag/release
+only after final asset acceptance and all required gates pass. Download
 the exact-name ZIP and evidence from the accepted GitHub release. Workflow
 buttons require the workflow to exist on the default branch. The uninitialized
 template itself remains nonreleasable.
 
-If builds fail after the version commit, that commit remains on main but no tag
-or release is created. A fresh Publish run with the same mode reuses that version
-when the previous stable tag still computes it; it does not fabricate build
-success or roll back user commits. Versions ahead of the computed candidate are
-rejected. If publication fails *after* pushing the accepted tag, it is retained:
-the workflow never deletes/replaces tags or overwrites an existing release.
+If Build fails, source metadata remains unchanged and no tag or release is
+created before final asset acceptance. An authorized Build retry can use the
+same source version if no remote collision exists; it needs no further bump
+and never fabricates build success or rolls back user commits.
+If publication fails *after* creating the accepted tag, it is retained:
+the workflow never deletes/replaces tags, clobbers an existing release or relies
+on tag-push publication.
 Inspect the retained evidence and resolve that publication failure explicitly.
 Main may advance during builds, but the accepted commit must still be in main's
 history before a new tag is created atomically through GitHub's refs API
