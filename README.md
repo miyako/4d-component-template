@@ -127,7 +127,7 @@ component/<repository>/
     Greeting.4dm                      replaceable feature API
   Project/Sources/Methods/_CaptureError.4dm
   Documentation/Classes/*.md           class contracts
-  Resources/logo.png + logo.svg        original icon/reference wrapper
+  Resources/logo.png + logo.svg        copied from assets/ by the build
   Resources/bin/macOS/<cli>            assembled universal executable
   Resources/bin/Windows/<cli>.exe      x64 executable
 tooling/compiler/                     real Compile project driver
@@ -632,19 +632,20 @@ then publishes only the literal validated asset list.
 
 ## Icons
 
-Original `assets/icon-source.svg` is rendered to a **real 1024×1024 RGBA PNG**.
-Resources `logo.svg` is a reference-style **64×64 SVG embedding a PNG data URI**
+The artwork is `assets/logo.png`, a **real 1024×1024 RGBA PNG**, and
+`assets/logo.svg`, a reference-style **64×64 SVG embedding a PNG data URI**
 whose decoded bytes equal `logo.png`. The convention is **PNG-in-SVG**, not the
-reverse (verified across all three inspirations).
+reverse (verified across all three inspirations). The build copies both into
+the component's `Resources/`.
 
 ```sh
 python3 scripts/generate_icons.py
 python3 scripts/generate_icons.py --check
 ```
 
-Regenerate both icons together. The dependency-free renderer supports this
-original rectangle/polygon artwork; unsupported elements fail explicitly.
-Use a pinned real SVG rasterizer for richer artwork, never rename SVG to PNG.
+Replace both files in `assets/` together, then run the first command (or any
+build) to refresh the Resources copies; the second fails when they are stale.
+The script validates the pair and rejects anything else. Never rename SVG to PNG.
 
 ## Remarks and validation limitations
 

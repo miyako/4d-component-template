@@ -112,6 +112,8 @@ def assemble(root=ROOT):
     mac.chmod(0o755)
     shutil.copyfile(inputs[2], windows)
     windows.chmod(0o755)
+    from generate_icons import generate as copy_icons
+    copy_icons(root)  # logo.png/logo.svg from assets/ into the same Resources folder
     return destination
 
 
