@@ -221,8 +221,9 @@ Update these surfaces together, preserving reusable infrastructure:
 7. Compiler-generated `Resources/en.lproj/syntaxEN.json`: regenerate through the
    actual compiler and verify the new class appears; never retain stale Greeting
    completion metadata.
-8. Redistribution notices under `component/<name>/Resources/licenses/`, and icon
-   source/generated icons only if the feature requires artwork changes.
+8. Redistribution notices under `component/<name>/Resources/licenses/`, and the
+   `assets/` logo pair with its Resources copies only if the feature requires
+   artwork changes.
 
 Keep `_CLI`, `_Process` and `_CaptureError` generic. Feature validators and
 algorithms belong in feature classes/CLI, not the process adapter. Add exact
@@ -247,6 +248,11 @@ a full Text regex match, not a substring search; e.g. check the identifier's
 version/variant grammar while separately asserting host-measured clock bounds,
 count or other semantic facts. Both modes still require complete non-null
 feature values, exact count, finished/mode flags and nonempty failure assertions.
+
+When the CLI validates what the component sends it (identifiers, uniqueness,
+sizes, ranges), the host fixture must send input produced by **real 4D** and
+assert that it satisfies those rules. Synthetic vectors in the language tests
+prove only that the validator works, not that real host data passes it.
 
 Both `feature.assertions` and `execution.assertions` use JSON-pointer `path`
 with `equals`, `matches`, `length`, nested `each`, or `absent:true`. An empty pointer addresses
@@ -317,6 +323,9 @@ generic build/host runner merely to accommodate random output.
   failure, timeout/abnormal exit, system errors, nonzero status and malformed
   protocol are failures. Preserve available stdout/stderr/status and diagnostic
   details; prelaunch failures must not invent an exit code.
+* A CLI that rejects input must name the offending field and value in its
+  error, within the feature's privacy limits. A generic "schema violation"
+  cannot be diagnosed from the 4D side.
 * Capture errors narrowly with `ON ERR CALL(...; ek local)`, restore
   `Method called on error(ek local)` immediately and retain `Last errors`.
   Never install a permanent host-global handler or use Null/empty success
@@ -330,6 +339,10 @@ generic build/host runner merely to accommodate random output.
   `CALL WORKER`, a live worker process, isolated per-call state, cancellation
   queue clearing and context pruning. Do not retrofit a shared unsafe PID map.
   `New process` is not a substitute for the callback/worker lifetime requirement.
+  A feature that keeps a process running must also expose a `terminate()` that
+  a **fresh** instance of the class can call, so the host's `On Exit` can stop
+  it without a stored handle; it waits a finite time for cleanup and succeeds
+  when nothing is running.
   Do not infer stdin input from every `-` argument: it may denote an output.
 * Use UTF-8 explicitly. Binary protocols need a separate deliberate Blob mode.
   Never blindly write empty stdout to an output file.
@@ -835,10 +848,13 @@ cross-build or optional skipped workflow as passed.
 
 ## 8. Icons, licensing and optional signing
 
-Edit original `assets/icon-source.svg` within the supported rectangle/polygon
-renderer; regenerate **both** Resources icons. `logo.png` is real RGBA PNG and
-`logo.svg` embeds its byte-identical PNG data URI: **PNG-in-SVG**, not the reverse.
-For arbitrary artwork use a pinned real SVG rasterizer. Never rename SVG to PNG.
+The logo artwork lives in `assets/logo.png` and `assets/logo.svg`; replace both
+together. `logo.png` is a real 1024x1024 8-bit RGBA PNG (ancillary chunks such as
+`sRGB`/`eXIf` are allowed) and `logo.svg` is a 64x64 SVG with one `<image>` whose
+data URI is the byte-identical PNG: **PNG-in-SVG**, not the reverse. Never rename
+SVG to PNG. `scripts/generate_icons.py` validates both and copies them into the
+component's `Resources/`; `ci_config.py assemble` runs the same copy during the
+build, and `--check` fails CI when the committed Resources copies are stale.
 
 The scaffold is MIT; retain its copyright/license. Review all bundled tools,
 static libraries and language runtimes separately and include required notices

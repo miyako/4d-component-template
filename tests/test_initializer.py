@@ -185,9 +185,14 @@ class IconTests(unittest.TestCase):
             if kind == b"IDAT":
                 compressed += payload
             position += length + 12
-        self.assertEqual(kinds, [b"IHDR", b"IDAT", b"IEND"])
+        # Critical chunks only IHDR/IDAT/IEND; ancillary metadata such as sRGB or eXIf is allowed.
+        self.assertEqual(kinds[0], b"IHDR")
+        self.assertEqual(kinds[-1], b"IEND")
+        self.assertEqual({kind for kind in kinds if kind[:1].isupper()}, {b"IHDR", b"IDAT", b"IEND"})
         self.assertEqual(len(zlib.decompress(compressed)), 1024 * (1 + 1024 * 4))
         svg = ET.parse(resources / "logo.svg").getroot()
         href = svg[0].attrib["{http://www.w3.org/1999/xlink}href"]
         self.assertTrue(href.startswith("data:image/png;base64,"))
-        self.assertEqual(base64.b64decode(href.split(",", 1)[1], validate=True), png)
+        self.assertEqual(base64.b64decode("".join(href.split(",", 1)[1].split()), validate=True), png)
+        for logo in ("logo.png", "logo.svg"):
+            self.assertEqual((resources / logo).read_bytes(), (ROOT / "assets" / logo).read_bytes())

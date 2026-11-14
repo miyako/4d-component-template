@@ -3,6 +3,7 @@ import hashlib
 import io
 import json
 import os
+import shutil
 from pathlib import Path
 import stat
 import struct
@@ -152,6 +153,9 @@ class DeliveryTests(unittest.TestCase):
             path.write_bytes(synthetic_pe() if target == "windows-x64" else b"mock native slice")
             record(self.root, target, path, True, "synthetic test")
             inputs.append(path)
+        (self.root / "assets").mkdir()
+        for name in ("logo.png", "logo.svg"):
+            shutil.copyfile(ROOT / "assets" / name, self.root / "assets" / name)
         with patch.dict(os.environ, {}, clear=True), patch("build_provenance.commit", return_value=None), patch.object(ci_config.subprocess, "run") as run:
             destination = ci_config.assemble(self.root)
         self.assertEqual(run.call_args_list, [
@@ -162,6 +166,8 @@ class DeliveryTests(unittest.TestCase):
         self.assertEqual(destination, self.mac.parent.parent)
         self.assertEqual(self.mac.stat().st_mode & 0o777, 0o755)
         self.assertEqual(self.windows.read_bytes(), inputs[2].read_bytes())
+        for name in ("logo.png", "logo.svg"):
+            self.assertEqual((destination.parent / name).read_bytes(), (ROOT / "assets" / name).read_bytes())
 
     def test_all_languages_preserve_repository_release_asset_identity(self):
         for language in ("go", "rust", "cpp"):
