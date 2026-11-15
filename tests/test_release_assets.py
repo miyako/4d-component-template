@@ -220,7 +220,7 @@ class ReleaseAssetsTests(unittest.TestCase):
         self.assertNotIn("shell", run.call_args.kwargs)
         self.assertNotIn("*.zip", arguments)
 
-    def test_release_secret_gate_and_manual_escalation_are_explicit(self):
+    def test_release_secret_gate_follows_version_policy(self):
         workflow = (ROOT / ".github/workflows/build.yml").read_text()
         unsigned = workflow.split("name: Build and accept unsigned component without Apple secrets")[1].split(
             "name: Sign, notarize, staple")[0]
@@ -231,7 +231,7 @@ class ReleaseAssetsTests(unittest.TestCase):
         self.assertIn("apple_signing == 'true'", signed)
         self.assertEqual(signed.count("secrets."), 7)
         self.assertIn("--require-apple-signing", signed)
-        self.assertIn("require_apple_signing:", workflow)
+        self.assertNotIn("require_apple_signing", workflow)
         self.assertIn("scripts/release_assets.py", workflow)
         self.assertNotIn("continue-on-error", workflow)
 

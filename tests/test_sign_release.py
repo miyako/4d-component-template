@@ -190,7 +190,7 @@ class SigningTests(unittest.TestCase):
 
     def test_policy_absent_unsigned_current_opt_in_and_other_version(self):
         output = self.root / "github-output"
-        for policy, expected in ((None, False), (["0.1.0"], True), (["0.2.0"], False)):
+        for policy, expected in ((None, False), (["0.1.0"], True), (["0.2.0"], False), (["*"], True)):
             if policy is None:
                 self.policy.unlink()
             else:
@@ -199,7 +199,7 @@ class SigningTests(unittest.TestCase):
                     contextlib.redirect_stdout(io.StringIO()) as text:
                 self.assertEqual(signing.policy_command(self.root, {"GITHUB_OUTPUT": str(output)}), expected)
             self.assertEqual(text.getvalue().strip(), "apple-notarized" if expected else "unsigned")
-        self.assertEqual(output.read_text(), "apple_signing=false\napple_signing=true\napple_signing=false\n")
+        self.assertEqual(output.read_text(), "apple_signing=false\napple_signing=true\napple_signing=false\napple_signing=true\n")
 
     def test_malformed_policy_fails(self):
         for policy in ("{", "[]", '{"schema":true,"apple_notarized_versions":[]}',
@@ -209,7 +209,10 @@ class SigningTests(unittest.TestCase):
                        '{"schema":1,"apple_notarized_versions":["01.1.0"]}',
                        '{"schema":1,"apple_notarized_versions":["v0.1.0"]}',
                        '{"schema":1,"apple_notarized_versions":["0.1.0","0.1.0"]}',
-                       '{"schema":1,"apple_notarized_versions":[],"extra":1}'):
+                       '{"schema":1,"apple_notarized_versions":[],"extra":1}',
+                       '{"schema":1,"apple_notarized_versions":["*","0.1.0"]}',
+                       '{"schema":1,"apple_notarized_versions":["*","*"]}',
+                       '{"schema":1,"apple_notarized_versions":["0.*"]}'):
             self.policy.write_text(policy)
             with self.subTest(policy=policy), self.assertRaises(ValueError):
                 signing.release_policy(self.root)

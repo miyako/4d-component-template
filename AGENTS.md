@@ -636,7 +636,7 @@ implemented here; unknown configuration is rejected rather than silently skipped
 | Nonpublishing hosted inspection | Actions **CI**, with hosted 4D opt-in |
 | Optional credential setup | User-owned setup guide/helper below; never agent-executed |
 | Source-only version update | Actions **Bump version**, explicitly selected branch, patch/minor/major |
-| Authorized publication | Actions **Build**, main, optional `require_apple_signing` only |
+| Authorized publication | Actions **Build**, main, no inputs |
 | Internal source-version stage | `release_source.py bump`; synchronized source metadata commit only |
 | Internal build/release stages | `release_source.py` preflight → reusable CI → `accept_hosted.py` / `sign_release.py` → `release_assets.py` / `release_ref.py` |
 
@@ -678,8 +678,8 @@ from the run's **Artifacts** without publishing a release. Separate
 all three same-revision native artifacts/manifests (each `execution:"passed"`),
 reassembles and runs the actual source/compile/package/final-host pipeline.
 It never publishes or marks unexecuted Intel/Windows 4D as passed. Its default
-inspection path is unsigned; release signing uses the explicit
-`--require-apple-signing` path documented below.
+inspection path is unsigned; release signing follows `release-policy.json` as
+documented below.
 
 Keep exactly `.github/workflows/ci.yml` (**CI**), `bump-version.yml`
 (**Bump version**) and `build.yml` (**Build**). CI remains nonpublishing.
@@ -702,8 +702,8 @@ selected-language version declarations, current CLI/class docs and version
 contracts. It must not rewrite dependencies, history or arbitrary feature data.
 Feature adaptations adding version fields must extend this bounded registry.
 
-**Actions → Build → Run workflow** requires **main** and has only the optional
-**require_apple_signing** checkbox. There is no version, tag, bump or mode input.
+**Actions → Build → Run workflow** requires **main** and has no inputs. There is no version, tag, bump, mode or
+signing input; signing follows `release-policy.json`.
 It checks out the immutable full `github.sha` selected at dispatch, not a later
 branch HEAD, and derives stable prefix-free `X.Y.Z` from synchronized source
 metadata. Before expensive reusable CI, `release_source.py` preflight requires
@@ -722,9 +722,7 @@ CI handles branch pushes, PRs and dispatch, never tags; the bot's `GITHUB_TOKEN`
 source-version commit does not recursively trigger CI. Build explicitly calls reusable CI
 with `release_call:true` to avoid a second optional compiled inspection.
 The same input commit must bind all native manifests and acceptance evidence.
-Signing policy is read at that exact dispatch SHA. Manual
-`require_apple_signing` can escalate an unsigned version but cannot downgrade
-a policy-required signed version.
+Signing policy is read at that exact dispatch SHA; there is no manual override.
 Only after compilation and exact final-host success does `release_assets.py`
 verify downloaded ZIP/DMG/proof bytes, accepted hashes/sizes, revision, native
 manifests and full source/final-host contracts. It then verifies main ancestry,
@@ -886,9 +884,11 @@ existing `.4dbase` layout without introducing an application `Contents/` tree.
 initialization. It defaults to
 `{"schema":1,"apple_notarized_versions":[]}`. List exact component versions
 without `v` to require signed releases; commit the policy before running Build
-for that next version. A missing policy or unlisted version means unsigned, malformed
-policy fails closed. Manual release `require_apple_signing` and the helper's
-`--require-apple-signing` can only escalate, never downgrade policy.
+for that next version. Or set the list to exactly `["*"]` to sign **every**
+version with no per-release policy edit (`"*"` cannot be mixed with versions).
+A missing policy or unlisted version means unsigned, malformed policy fails
+closed. The helper's `--require-apple-signing` can only escalate, never
+downgrade policy; the Build workflow has no input for it.
 `scripts/sign_release.py policy --root .` emits `apple_signing` without accessing
 secrets; the workflow passes credentials only to the policy-true stage.
 Merely registering secrets does not change policy, and no secret below is
@@ -1026,9 +1026,8 @@ or repositories updated. After user completion, inspect names/timestamps again
 (the six required names; `CODESIGN_APPLE_ID` only if the user pinned one); never
 inspect their values.
 Setup alone changes neither signing policy nor publication authorization.
-Separate user permission is required for main-only **Build**, whose only input
-is optional `require_apple_signing`; version comes from synchronized source at
-the immutable dispatch SHA. **Bump version** is a separately authorized,
+Separate user permission is required for main-only **Build**, which has no
+inputs; version comes from synchronized source at the immutable dispatch SHA. **Bump version** is a separately authorized,
 source-only patch/minor/major action on the explicitly selected branch.
 Never dispatch Build as a setup check, invent version/tag/bump inputs or a tag-push trigger,
 or prefix component SemVer tags with `v`.

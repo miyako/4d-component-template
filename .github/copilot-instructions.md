@@ -35,8 +35,8 @@ explicitly selected dispatch branch; no tags/builds/releases/workflow dispatch.
 selected branch remote HEAD exactly equal to it (fails if moved); it bumps
 max(current source, stable X.Y.Z/legacy v history), never reuses old candidates,
 stages bounded surfaces and non-force pushes only that branch.
-**Build** (`build.yml`) remains main-only, accepts only optional
-`require_apple_signing` (no version/tag/bump input), derives stable `X.Y.Z` from
+**Build** (`build.yml`) remains main-only, accepts no inputs
+(no version/tag/bump/signing input), derives stable `X.Y.Z` from
 synchronized source metadata at that exact SHA, preflights clean/exact source,
 collisions and main ancestry before expensive CI. Nonmutating preflight requires
 main dispatch/HEAD exactly equal to `github.sha`, validates all version surfaces

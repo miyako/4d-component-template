@@ -74,7 +74,7 @@ or packaging; do not turn an SDK requirement into a component resource.
    Manual initialized CI with `FOURD_ENABLED=true` retains an accepted compiled
    ZIP and adjacent evidence without publishing. Release signing is implemented:
    `release-policy.json.apple_notarized_versions` defaults to unsigned; a listed
-   version or manual `require_apple_signing` opts in. Only that branch receives
+   version (or the list `["*"]` for every version) opts in. Only that branch receives
    the signing secrets, takes the signing identity from the imported
    certificate (exactly one Developer ID Application identity of
    `NOTARYTOOL_TEAM_ID`; optional `CODESIGN_APPLE_ID` only pins it), signs an isolated copy, notarizes/staples its DMG, repacks
@@ -91,8 +91,8 @@ or packaging; do not turn an SDK requirement into a component resource.
    docs and commits only synchronized source metadata to the explicitly selected
    dispatch branch, staging bounded surfaces and non-force pushing only that
    branch. It performs no builds, tags, releases or workflow dispatch.
-   Separately authorized Build remains main-only and accepts only optional
-   `require_apple_signing`, never version/tag/bump/mode input. It checks out
+   Separately authorized Build remains main-only and accepts no
+   inputs, never version/tag/bump/mode/signing input. It checks out
    immutable dispatch `github.sha`, derives stable prefix-free `X.Y.Z` from
    synchronized source metadata. Before expensive reusable CI, nonmutating
    `release_source.py` preflight requires main dispatch/HEAD exactly equal to

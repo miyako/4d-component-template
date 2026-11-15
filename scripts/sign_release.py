@@ -90,6 +90,8 @@ def release_policy(root=ROOT):
             or not isinstance(policy["apple_notarized_versions"], list)):
         raise SigningError("invalid release-policy.json schema")
     versions = policy["apple_notarized_versions"]
+    if versions == ["*"]:
+        return True  # sign every version; no per-release policy edit needed
     if (any(not isinstance(version, str) or not re.fullmatch(SEMVER, version, re.ASCII)
             for version in versions) or len(set(versions)) != len(versions)):
         raise SigningError("invalid apple_notarized_versions")

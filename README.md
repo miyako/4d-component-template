@@ -473,8 +473,7 @@ version declarations, version contracts and current CLI/class documentation
 without rewriting unrelated dependency or historical versions.
 
 After that source version is on main, separately authorize
-**Actions → Build → Run workflow** on **main**. Its only input is the optional
-**require_apple_signing** checkbox: there is no version, tag, bump or mode input.
+**Actions → Build → Run workflow** on **main**. It has no inputs: there is no version, tag, bump, mode or signing input.
 Build checks out the immutable full `github.sha` selected at dispatch, not a
 later branch HEAD, and derives stable prefix-free `X.Y.Z` from synchronized
 source metadata. Before expensive reusable CI, `release_source.py` preflight
@@ -493,9 +492,7 @@ CI runs on branch pushes, PRs and manual requests, not tag pushes; the bot's
 `GITHUB_TOKEN` source-version commit does not trigger a recursive CI run. Build calls CI
 explicitly and performs mandatory 4D acceptance separately, without duplicating
 CI's optional compiled-package inspection.
-Signing policy is read from that immutable dispatch SHA. The optional
-**require_apple_signing** checkbox escalates an unsigned version to signed;
-leaving it unchecked never downgrades a policy-required signed version.
+Signing policy is read from that immutable dispatch SHA; there is no manual override.
 Do not dispatch publication or create tags without approval. Merely opening
 this PR does not make the new **Run workflow** button available in the default
 template; the workflow file must first merge.
@@ -513,9 +510,9 @@ commit its exact intended version (without `v`) before running Build:
 
 The policy is independent of repository, namespace, CLI and selected language.
 Initialization preserves it. A missing policy or an unlisted version is
-unsigned; malformed policy fails closed. Alternatively, check
-**require_apple_signing** for a manual release dispatch. That flag can only
-escalate, never downgrade the version policy. The policy gate accesses no
+unsigned; malformed policy fails closed. To sign every version without editing
+the policy per release, set the list to exactly `["*"]` (it cannot be mixed with
+versions). The policy gate accesses no
 secrets and emits `apple_signing`; only its signed branch receives the
 credentials below. Unsigned CI/local acceptance and unsigned publication need
 none of them. Registering credentials alone does not change the policy.

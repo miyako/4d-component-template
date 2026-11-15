@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Validate the inherited CI, Bump version and Build roles without mutations."""
 import argparse
-import ast
 import json
 from pathlib import Path, PurePosixPath
 import re
@@ -25,6 +24,7 @@ COMMANDS = {
     "ci_config.py download-tool4d": "python scripts/ci_config.py download-tool4d",
     "release_source.py --repository": 'python scripts/release_source.py --repository "$GITHUB_REPOSITORY" preflight',
     "release_source.py": 'python scripts/release_source.py --repository "$GITHUB_REPOSITORY" bump --mode "$MODE"',
+    "sign_release.py": "python scripts/sign_release.py policy --root .",
     "ci_config.py validate": 'python scripts/ci_config.py validate --release --tag "$RELEASE_TAG"',
     "pip install -r tooling/requirements-workflow.txt": "python -m pip install -r tooling/requirements-workflow.txt",
     "scripts/release_assets.py": '''
@@ -34,15 +34,6 @@ python scripts/release_assets.py --repository "$GH_REPO" --tag "$RELEASE_TAG" \\
   --sha "$RELEASE_SHA" "${signing[@]}" --create-tag --publish
 ''',
 }
-POLICY_PROGRAM = '''
-import os, subprocess, sys
-arguments = [sys.executable, "scripts/sign_release.py", "policy", "--root", "."]
-if os.environ["REQUIRE_APPLE_SIGNING"] == "true":
-    arguments.append("--require-apple-signing")
-subprocess.run(arguments, check=True)
-'''
-
-
 def shell_tokens(text):
     tokens = shlex.split(text.replace("\\\n", ""), comments=True)
     if tokens and tokens[0] == "python3":
@@ -184,11 +175,8 @@ def validate(root=ROOT):
     require(mode.get("type") == "choice" and mode.get("required") is True
             and mode.get("options") == ["patch", "minor", "major"] and mode.get("default") == "patch",
             "Bump version requires patch/minor/major with default patch")
-    inputs = build["on"]["workflow_dispatch"]["inputs"]
-    require(set(inputs) == {"require_apple_signing"}, "Build has no tag/version/bump inputs")
-    signing = inputs["require_apple_signing"]
-    require(signing.get("type") == "boolean" and signing.get("default") is False
-            and signing.get("required") is False, "signing input must remain optional escalation")
+    dispatch = build["on"]["workflow_dispatch"]
+    require(not (dispatch or {}).get("inputs"), "Build has no inputs: signing follows the version policy")
     require(build.get("concurrency") == {"group": "publish", "cancel-in-progress": False},
             "Build must not cancel an active publication")
     require(bump.get("concurrency") == {
@@ -358,13 +346,8 @@ def validate(root=ROOT):
                         and step["with"].get("if-no-files-found") == "error",
                         "accepted ZIP and adjacent evidence are required")
     policy = command(version, "sign_release.py")[1]
-    require(policy.get("env") == {"REQUIRE_APPLE_SIGNING": "${{ inputs.require_apple_signing }}"}
-            and policy.get("shell") == "python", "manual signing must only escalate policy")
-    try:
-        require(ast.dump(ast.parse(policy["run"])) == ast.dump(ast.parse(POLICY_PROGRAM)),
-                "signing policy must execute the checked escalation-only program")
-    except SyntaxError as error:
-        raise ValueError("invalid signing policy program") from error
+    require(policy.get("env") is None and policy.get("shell") is None,
+            "signing policy comes only from release-policy.json")
     for job in (ci["jobs"]["configuration"], version, bump_job):
         install = command(job, "pip install -r tooling/requirements-workflow.txt")[0]
         require(install < command(job, "workflow_contract.py")[0],
