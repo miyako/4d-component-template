@@ -1,6 +1,8 @@
 name: Build
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
 
 permissions:
   contents: read
@@ -11,17 +13,33 @@ concurrency:
 
 jobs:
   preflight:
+    # Hands-off: a push to main only auto-publishes when it is an exact
+    # "Bump version to major.minor.patch" release commit (produced by the
+    # Bump version workflow); any other push to main skips the whole build.
+    if: "github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && startsWith(github.event.head_commit.message, 'Bump version to '))"
     runs-on: ubuntu-24.04
     outputs:
       source_sha: ${{ steps.source.outputs.source_sha }}
       release_tag: ${{ steps.source.outputs.release_tag }}
       apple_signing: ${{ steps.signing_policy.outputs.apple_signing }}
     steps:
-      - name: Require manual publication from main
+      - name: Require publication from main
         if: github.ref != 'refs/heads/main'
         run: |
           echo "Build must be run on main." >&2
           exit 1
+      - name: Auto-publication gate — only an exact release version bump commit may publish
+        if: github.event_name == 'push'
+        env:
+          HEAD_MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          python3 - <<'PY'
+          import os, re, sys
+          pattern = r"Bump version to (?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)"
+          message = os.environ.get("HEAD_MESSAGE") or ""
+          if not re.fullmatch(pattern, message):
+              sys.exit("Build auto-publication requires an exact 'Bump version to major.minor.patch' commit")
+          PY
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}

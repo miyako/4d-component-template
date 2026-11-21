@@ -51,6 +51,11 @@ class ReleaseSourceTests(unittest.TestCase):
         self.commit("initialized fixture")
         subprocess.run(["git", "init", "-q", "--bare", str(self.origin)],
                        check=True, capture_output=True, text=True)
+        # Newer Git refuses deleting the bare remote's current branch, which
+        # test_preflight_missing_main_fails_before_availability exercises.
+        subprocess.run(["git", "-C", str(self.origin), "config",
+                        "receive.denyDeleteCurrent", "ignore"],
+                       check=True, capture_output=True, text=True)
         self.git("config", "url." + str(self.origin) + ".insteadOf", self.origin_url)
         self.git("push", "-q", "origin", "HEAD:refs/heads/main")
         # Git expands insteadOf in get-url, but the configured origin is GitHub.
@@ -111,8 +116,10 @@ class ReleaseSourceTests(unittest.TestCase):
         invalid = [
             {"GITHUB_SHA": "0" * 40}, {"GITHUB_SHA": "abc1234"},
             {"GITHUB_SHA": "A" * 40}, {"GITHUB_SHA": "f" * 64},
-            {"GITHUB_SHA": ""}, {"GITHUB_EVENT_NAME": "push"},
-            {"GITHUB_EVENT_NAME": "pull_request"}, {"GITHUB_EVENT_NAME": ""},
+            {"GITHUB_SHA": ""}, {"GITHUB_EVENT_NAME": "push", "GITHUB_REF": "refs/heads/feature"},
+            {"GITHUB_EVENT_NAME": "push", "GITHUB_REF": "refs/heads/v1"},
+            {"GITHUB_EVENT_NAME": "workflow_run"}, {"GITHUB_EVENT_NAME": "pull_request"},
+            {"GITHUB_EVENT_NAME": ""},
             {"GITHUB_REF": "refs/tags/0.1.0"}, {"GITHUB_REF": "refs/pull/1/head"},
             {"GITHUB_REF": "main"}, {"GITHUB_REF": "refs/heads/"},
             {"GITHUB_REF": "refs/heads/invalid..branch"},
@@ -123,6 +130,15 @@ class ReleaseSourceTests(unittest.TestCase):
                 with self.assertRaises((ValueError, subprocess.CalledProcessError)):
                     release_source.dispatch_source(self.root, self.env(**changes))
                 self.assertEqual(before, self.state())
+        self.available.assert_not_called()
+
+    def test_dispatch_accepts_release_bump_push_on_main(self):
+        env = self.env()
+        env["GITHUB_EVENT_NAME"] = "push"
+        before = self.state()
+        self.assertEqual(release_source.dispatch_source(self.root, env),
+                         (env["GITHUB_REF"], env["GITHUB_SHA"]))
+        self.assertEqual(before, self.state())
         self.available.assert_not_called()
 
     def test_bump_commits_only_bounded_metadata_and_pushes_only_selected_branch(self):
@@ -220,6 +236,18 @@ class ReleaseSourceTests(unittest.TestCase):
         self.available.assert_called_once_with(self.root, self.repository, "2.3.4")
         self.assertEqual(before, self.state())
 
+    def test_preflight_accepts_release_bump_push_event_with_pushed_sha(self):
+        bump_release.apply(self.root, "2.3.4", self.repository)
+        sha = self.commit("Bump version to 2.3.4")
+        self.git("push", "-q", "origin", "HEAD:refs/heads/main")
+        env = self.env()
+        env["GITHUB_EVENT_NAME"] = "push"
+        before = self.state()
+        result = release_source.preflight(self.root, self.repository, env)
+        self.assertEqual(result, {"source_sha": sha, "release_tag": "2.3.4"})
+        self.available.assert_called_once_with(self.root, self.repository, "2.3.4")
+        self.assertEqual(before, self.state())
+
     def test_preflight_keeps_dispatch_sha_when_main_advances(self):
         env = self.env()
         later = self.advance_remote()
@@ -232,7 +260,9 @@ class ReleaseSourceTests(unittest.TestCase):
 
     def test_preflight_requires_main_dispatch_before_source_or_network_operations(self):
         for changes in ({"GITHUB_REF": "refs/heads/selected"},
-                        {"GITHUB_REF": "refs/tags/0.1.0"}, {"GITHUB_EVENT_NAME": "push"}):
+                        {"GITHUB_REF": "refs/tags/0.1.0"},
+                        {"GITHUB_EVENT_NAME": "push", "GITHUB_REF": "refs/heads/feature"},
+                        {"GITHUB_EVENT_NAME": "workflow_run"}):
             with self.subTest(changes=changes):
                 with patch.object(release_source, "dispatch_source") as dispatch:
                     with self.assertRaisesRegex(ValueError, "main"):

@@ -127,9 +127,14 @@ class ReleaseRefTests(unittest.TestCase):
         self.assertTrue(release.startswith("name: Build\n"))
         self.assertTrue(bump.startswith("name: Bump version\n"))
         self.assertIn("branches: ['**']", ci)
-        self.assertNotIn("  push:", release)
+        self.assertIn("branches: [main]", release)
+        self.assertNotIn("tags:", release)
         self.assertNotIn("version_tag:", release)
         self.assertNotIn("mode:", release)
+        self.assertIn("if: \"github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && "
+                      "startsWith(github.event.head_commit.message, 'Bump version to '))\"", release)
+        self.assertIn("if: github.event_name == 'push'", release)
+        self.assertIn("HEAD_MESSAGE: ${{ github.event.head_commit.message }}", release)
         self.assertIn("options: [patch, minor, major]", bump)
         self.assertIn("default: patch", bump)
         self.assertIn("group: publish\n  cancel-in-progress: false", release)
@@ -162,7 +167,9 @@ class ReleaseRefTests(unittest.TestCase):
 
     def test_main_guard_rejects_nonmanual_and_nonmain_runs(self):
         release_ref.require_main({"GITHUB_EVENT_NAME": "workflow_dispatch", "GITHUB_REF": "refs/heads/main"})
-        for event, ref in (("push", "refs/heads/main"), ("workflow_dispatch", "refs/heads/feature"),
+        release_ref.require_main({"GITHUB_EVENT_NAME": "push", "GITHUB_REF": "refs/heads/main"})
+        for event, ref in (("push", "refs/heads/feature"), ("workflow_run", "refs/heads/main"),
+                           ("workflow_dispatch", "refs/heads/feature"),
                            ("workflow_dispatch", "refs/tags/0.1.0"), ("", "")):
             with self.subTest(event=event, ref=ref), self.assertRaisesRegex(ValueError, "on main"):
                 release_ref.require_main({"GITHUB_EVENT_NAME": event, "GITHUB_REF": ref})

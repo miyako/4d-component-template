@@ -563,7 +563,9 @@ For approved hosted publication only, set Actions **variable**
 `FOURD_ENABLED=true`; `TOOL4D_URL` / `TOOL4D_SHA256` are optional paired overrides
 of the approved public `package.json.tool` pin, not required secrets. Use manual
 Bump version to commit synchronized source metadata to an explicitly selected
-branch, then separately authorize Build on main for that immutable dispatch SHA.
+branch; when that branch is main, Build starts automatically on the release
+bump commit (hands-off all the way to publication) for that immutable SHA, and
+a manual Build dispatch on main remains the equivalent retry path.
 Build derives the version from source; it does not bump it. Jobs compile after
 assembly and host-test the unpacked package before publishing `<repository>.zip`.
 Only the source-version commit and publication jobs receive built-in
@@ -571,7 +573,7 @@ Only the source-version commit and publication jobs receive built-in
 must permit the bot's non-force commit to the selected branch; rejection fails
 closed rather than bypassing protection.
 
-### CI and two manual release-facing actions
+### CI, a manual bump and hands-off publication
 
 #### Enforced generated contract and bounded configuration
 
@@ -587,7 +589,7 @@ python3 scripts/workflow_contract.py --root .
 
 Use a local virtual environment when appropriate. This pinned YAML parser is
 development tooling, not a component runtime dependency. Validation never
-dispatches, builds, publishes or accesses credentials. CI and both manual actions
+dispatches, builds, publishes or accesses credentials. CI and both release actions
 enforce it before their work; initialization rejects an invalid inherited
 contract before destination writes.
 
@@ -1026,9 +1028,12 @@ or repositories updated. After user completion, inspect names/timestamps again
 (the six required names; `CODESIGN_APPLE_ID` only if the user pinned one); never
 inspect their values.
 Setup alone changes neither signing policy nor publication authorization.
-Separate user permission is required for main-only **Build**, which has no
-inputs; version comes from synchronized source at the immutable dispatch SHA. **Bump version** is a separately authorized,
+**Bump version** is the only manually authorized release-facing action: a
 source-only patch/minor/major action on the explicitly selected branch.
+**Build** is main-only with no inputs and auto-runs on an exact
+`Bump version to major.minor.patch` push to main (any other main push skips the
+whole build); version comes from synchronized source at the immutable
+pushed/dispatched SHA. Manual Build dispatch on main is the equivalent retry path.
 Never dispatch Build as a setup check, invent version/tag/bump inputs or a tag-push trigger,
 or prefix component SemVer tags with `v`.
 

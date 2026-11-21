@@ -42,8 +42,10 @@ def verify(root, tag, expected_sha):
 
 def require_main(env=None):
     env = os.environ if env is None else env
-    if env.get("GITHUB_EVENT_NAME") != "workflow_dispatch" or env.get("GITHUB_REF") != "refs/heads/main":
-        raise ValueError("Build must be manually dispatched on main")
+    if env.get("GITHUB_EVENT_NAME") not in ("workflow_dispatch", "push") \
+            or env.get("GITHUB_REF") != "refs/heads/main":
+        raise ValueError("Build must be dispatched on main or auto-run by a release "
+                         "version bump push on main")
 
 
 def available(root, repository, tag):

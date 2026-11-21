@@ -389,14 +389,14 @@ DerivedData/Libraries with `output_sha256`, rejecting changed outputs at packagi
 
 Bump version synchronizes source version metadata in a separate source-only
 commit. Build derives the stable version from synchronized source metadata at
-the immutable dispatch `github.sha` on main and builds all CLI targets from that
+the immutable pushed/dispatched `github.sha` on main and builds all CLI targets from that
 exact full SHA. It never bumps the version or commits source. It compiles after
 Resources assembly, packs `REPOSITORY.zip`,
 and **loads the unpacked compiled package in a real 4D host before publishing**.
 Uninitialized/misnamed projects, missing tool/binary/library, failed compile or
 failed host test fail closed. Only after downloaded assets pass verification
 does it create the prefix-free `<version>` tag and the GitHub release. Built-in `GITHUB_TOKEN`
-performs the separately authorized source commit and final tag/release operations;
+performs the source commit and final tag/release operations;
 no personal token is needed.
 
 ```text
@@ -449,9 +449,10 @@ It requires `execution:"passed"` in each verified native manifest, reassembles
 resources, source-tests, compiles, packs and compiled-host-tests before saving
 stable evidence. Cross-only manifests are not hosted native evidence.
 
-There are three workflows: nonpublishing **CI** (`ci.yml`) and two manual
-release-facing actions, **Bump version** (`bump-version.yml`) and **Build**
-(`build.yml`). They deliberately separate source version changes from publication.
+There are three workflows: nonpublishing **CI** (`ci.yml`), the manual
+**Bump version** (`bump-version.yml`) and the hands-off **Build** (`build.yml`).
+They separate source version changes from publication; once a release version
+bump commit lands on main, publication follows automatically.
 
 Open **Actions → Bump version → Run workflow**, explicitly select the branch
 to receive the commit, and choose **mode**: **patch** (default), **minor** or
@@ -460,8 +461,10 @@ validates immutable dispatch SHA, clean checkout and all current version
 surfaces before writes. The selected branch's current remote HEAD must exactly
 equal that dispatch SHA; if it moved, Bump fails rather than switching revisions.
 It stages bounded surfaces, commits only synchronized source metadata and
-non-force pushes only the selected dispatch branch. It creates no tags, builds,
-releases or workflow dispatch and does not automatically start Build.
+non-force pushes only the selected dispatch branch. It creates no tags, builds
+or releases. When the selected branch is main, that push is the auto-publication
+trigger: **Build starts automatically (hands-off)** for the bumped SHA; pushes to
+other branches still require a manual Build dispatch.
 Its `next_version` call uses the greater of current authoritative source version
 and the highest stable `X.Y.Z`/legacy `vX.Y.Z` history as its base (not tag dates;
 prerelease and build-metadata tags are ignored). With no stable tag, it bumps
@@ -472,12 +475,16 @@ The generic version helper updates package/template metadata, selected-language
 version declarations, version contracts and current CLI/class documentation
 without rewriting unrelated dependency or historical versions.
 
-After that source version is on main, separately authorize
-**Actions → Build → Run workflow** on **main**. It has no inputs: there is no version, tag, bump, mode or signing input.
-Build checks out the immutable full `github.sha` selected at dispatch, not a
+When that source version lands on main as the bump commit, Build starts
+automatically; manual **Actions → Build → Run workflow** on **main** is the
+equivalent retry path. It has no inputs: there is no version, tag, bump, mode or signing input.
+A push to main only auto-runs when it is an exact `Bump version to major.minor.patch`
+commit (fail-closed re-check inside preflight); any other main push skips the build
+without failing. Build checks out the immutable full pushed/dispatched `github.sha`, not a
 later branch HEAD, and derives stable prefix-free `X.Y.Z` from synchronized
 source metadata. Before expensive reusable CI, `release_source.py` preflight
-requires a main dispatch and checkout HEAD exactly equal to `github.sha`,
+requires a main dispatch or main release-bump push and checkout HEAD exactly
+equal to `github.sha`,
 validates clean/exact source and all version surfaces using `bump_release.plan`
 at that same version, requires source version to exceed stable published
 `X.Y.Z`/legacy `vX.Y.Z` history, and checks tag/release collisions and main
@@ -492,8 +499,10 @@ CI runs on branch pushes, PRs and manual requests, not tag pushes; the bot's
 `GITHUB_TOKEN` source-version commit does not trigger a recursive CI run. Build calls CI
 explicitly and performs mandatory 4D acceptance separately, without duplicating
 CI's optional compiled-package inspection.
-Signing policy is read from that immutable dispatch SHA; there is no manual override.
-Do not dispatch publication or create tags without approval. Merely opening
+Signing policy is read from that immutable pushed/dispatched SHA; there is no manual override.
+Hands-off publication of an accepted build is the intended
+default; manual Build dispatch and tag creation remain reserved for retries.
+Merely opening
 this PR does not make the new **Run workflow** button available in the default
 template; the workflow file must first merge.
 
@@ -602,9 +611,10 @@ a signed version and register its six secrets. Run **CI → Run workflow** to
 inspect the compiled ZIP/evidence without publication. After approval, run
 **Bump version → Run workflow**, explicitly selecting the destination branch
 and patch/minor/major. It validates and commits synchronized source metadata
-only; merge that commit to main if needed. Separately authorize
-**Build → Run workflow** on **main**, with only optional signing escalation.
-Build derives the version from synchronized source at immutable dispatch
+only; merge that commit to main if needed. When it lands on main, **Build →
+auto-runs (hands-off)** for the bumped SHA (manual **Build → Run workflow** on
+**main** is the equivalent retry path, with only optional signing escalation).
+Build derives the version from synchronized source at immutable pushed/dispatched
 `github.sha`, preflights source/collisions/main ancestry, and builds/tests that
 same full SHA through CI, acceptance and publication. It creates the tag/release
 only after final asset acceptance and all required gates pass. Download

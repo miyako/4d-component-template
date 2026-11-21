@@ -80,8 +80,11 @@ or packaging; do not turn an SDK requirement into a component resource.
    `NOTARYTOOL_TEAM_ID`; optional `CODESIGN_APPLE_ID` only pins it), signs an isolated copy, notarizes/staples its DMG, repacks
    the ZIP from the final mounted DMG and reruns exact final ZIP compiled-host
    acceptance. Missing credentials or signing errors never downgrade to unsigned.
-   Keep CI nonpublishing plus two manual release-facing actions: **Bump version**
-   in `bump-version.yml` and **Build** in `build.yml`. Bump version accepts
+   Keep CI nonpublishing, **Bump version** manual, and publication hands-off:
+   **Bump version** lives in `bump-version.yml`, **Build** in `build.yml`.
+   An exact `Bump version to major.minor.patch` push to main auto-runs Build
+   all the way to publication; any other main push skips the whole build.
+   Bump version accepts
    patch/minor/major (default patch). `release_source.py bump` validates immutable
    dispatch SHA, clean checkout, current version surfaces and selected branch
    remote HEAD exactly equal to dispatch SHA (fails if moved). It increments the
@@ -91,15 +94,18 @@ or packaging; do not turn an SDK requirement into a component resource.
    docs and commits only synchronized source metadata to the explicitly selected
    dispatch branch, staging bounded surfaces and non-force pushing only that
    branch. It performs no builds, tags, releases or workflow dispatch.
-   Separately authorized Build remains main-only and accepts no
-   inputs, never version/tag/bump/mode/signing input. It checks out
-   immutable dispatch `github.sha`, derives stable prefix-free `X.Y.Z` from
+   Build remains main-only and accepts no
+   inputs, never version/tag/bump/mode/signing input; it auto-runs on the
+   release bump push to main and can also be manually dispatched (retry path).
+   It checks out
+   immutable pushed/dispatched `github.sha`, derives stable prefix-free `X.Y.Z` from
    synchronized source metadata. Before expensive reusable CI, nonmutating
-   `release_source.py` preflight requires main dispatch/HEAD exactly equal to
+   `release_source.py` preflight requires a main dispatch or main release-bump push
+   with HEAD exactly equal to
    `github.sha`, clean/exact source, all version surfaces validated with
    `bump_release.plan` at the same version, source version greater than stable
    published tag history, no collisions and main ancestry. Main may advance
-   later, but source stays at dispatch SHA, never newer main HEAD. Pass that same full SHA
+   later, but source stays at the pushed/dispatched SHA, never newer main HEAD. Pass that same full SHA
    through CI, acceptance and final publication, preserving every package,
    compiler, runtime, provenance and signing gate. Downloaded asset/hash/
    final-host acceptance precedes tag/release creation; recheck collisions and

@@ -19,9 +19,18 @@ def git(root, *arguments):
 
 def dispatch_source(root, env=None):
     env = os.environ if env is None else env
+    event = env.get("GITHUB_EVENT_NAME", "")
     ref, revision = env.get("GITHUB_REF", ""), env.get("GITHUB_SHA", "")
-    if env.get("GITHUB_EVENT_NAME") != "workflow_dispatch" or not ref.startswith("refs/heads/"):
-        raise ValueError("release actions require an explicitly selected branch dispatch")
+    # workflow_dispatch: explicitly selected branch. push on main: the
+    # hands-off auto-publication path; build.yml's gate restricts it to
+    # exact "Bump version to major.minor.patch" commits before anything runs.
+    if event == "push" and ref == "refs/heads/main":
+        pass
+    elif event == "workflow_dispatch" and ref.startswith("refs/heads/"):
+        pass
+    else:
+        raise ValueError("release actions require an explicitly selected branch dispatch "
+                         "or a release version bump push on main")
     git(root, "check-ref-format", ref)
     if not re.fullmatch(r"[0-9a-f]{40}", revision, flags=re.ASCII):
         raise ValueError("dispatch requires a full normalized source SHA")

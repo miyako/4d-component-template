@@ -51,6 +51,22 @@ def require(condition, message):
         raise ValueError("workflow contract: " + message)
 
 
+# Hands-off publication: a push to main auto-runs Build → publish only when the
+# pushed commit is an exact "Bump version to major.minor.patch" release commit
+# (the shape Bump version produces); every other push to main skips the build.
+# The preflight gate re-checks the full pattern fail-closed inside the build.
+HANDS_OFF_IF = ("github.event_name == 'workflow_dispatch' || "
+                "(github.event_name == 'push' && "
+                "startsWith(github.event.head_commit.message, 'Bump version to '))")
+HANDS_OFF_GATE = """python3 - <<'PY'
+import os, re, sys
+pattern = r"Bump version to (?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)"
+message = os.environ.get("HEAD_MESSAGE") or ""
+if not re.fullmatch(pattern, message):
+    sys.exit("Build auto-publication requires an exact 'Bump version to major.minor.patch' commit")
+PY"""
+
+
 def regular(root, relative):
     path = root / relative
     require(path.is_file() and not any(p.is_symlink() for p in (path, *path.parents)),
@@ -165,10 +181,13 @@ def validate(root=ROOT):
             "source_sha": {"type": "string", "default": ""},
             "release_call": {"type": "boolean", "default": False}}},
     }, "CI triggers/reusable inputs must retain the canonical contract")
-    for document in (bump, build):
-        trigger = document.get("on")
-        require(isinstance(trigger, dict) and set(trigger) == {"workflow_dispatch"},
-                "release-facing actions must be manual only")
+    bump_trigger, build_trigger = bump.get("on"), build.get("on")
+    require(isinstance(bump_trigger, dict) and set(bump_trigger) == {"workflow_dispatch"},
+            "Bump version must remain manual only")
+    require(isinstance(build_trigger, dict)
+            and set(build_trigger) == {"workflow_dispatch", "push"}
+            and build_trigger["push"] == {"branches": ["main"]},
+            "Build accepts manual dispatch plus the main release-bump push trigger only")
     bump_inputs = bump["on"]["workflow_dispatch"]["inputs"]
     require(set(bump_inputs) == {"mode"}, "Bump version accepts only mode")
     mode = bump_inputs["mode"]
@@ -206,7 +225,13 @@ def validate(root=ROOT):
             permissions = ({"contents": "write"} if (name, job_name) in {
                 ("bump-version", "bump"), ("build", "publish")} else None)
             require(job.get("permissions") == permissions, "unexpected job write permission")
-            require(name == "ci" or "if" not in job, "release jobs cannot bypass acceptance")
+            if (name, job_name) == ("build", "preflight"):
+                require(job.get("if") == HANDS_OFF_IF,
+                        "Build preflight must gate hands-off auto-publication "
+                        "on exact release bump commits")
+            else:
+                require(name == "ci" or "if" not in job,
+                        "release jobs cannot bypass acceptance")
             require("continue-on-error" not in job, "job failure bypass prohibited")
             for step in job.get("steps", []):
                 require("continue-on-error" not in step, "step failure bypass prohibited")
@@ -233,6 +258,12 @@ def validate(root=ROOT):
 
     version = build["jobs"]["preflight"]
     guard = version["steps"][0]
+    gate = version["steps"][1]
+    require(gate.get("name", "").startswith("Auto-publication gate")
+            and gate.get("if") == "github.event_name == 'push'"
+            and gate.get("env", {}) == {"HEAD_MESSAGE": "${{ github.event.head_commit.message }}"}
+            and gate.get("run", "").strip() == HANDS_OFF_GATE,
+            "hands-off auto-publication gate must fail closed on non-release commits")
     guard_commands = [tokens for line in guard.get("run", "").splitlines()
                       if (tokens := shell_tokens(line))]
     require(guard.get("if") == "github.ref != 'refs/heads/main'"
@@ -263,7 +294,7 @@ def validate(root=ROOT):
                                     "ci_config.py validate", "sign_release.py",
                                     "pip install -r tooling/requirements-workflow.txt"})):
         for step in job["steps"]:
-            if step is guard:
+            if step is guard or (name == "build" and step is gate):
                 continue
             if "run" in step:
                 require(sum(needle in step["run"] for needle in allowed) == 1,
