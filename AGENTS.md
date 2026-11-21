@@ -376,6 +376,9 @@ Each executable is accompanied by `build/<target>/build-manifest.json`, binding
 CLI source/config/package inputs, Git commit and binary SHA256. Native CI uploads
 the manifest with the executable. Assembly refuses missing, stale, modified or
 mixed-source manifests; a plausible filename/header alone is not provenance.
+When the component lives inside a larger worktree (monorepo), the manifest's
+commit is the enclosing repository's HEAD, resolved by walking up to the Git
+toplevel; the release SHA checks in the scripts use the same resolution.
 Preserve `.gitattributes`: LF text checkout on macOS **and Windows** keeps those
 content hashes identical; automatic CRLF conversion would create different
 inputs despite an identical Git commit.
