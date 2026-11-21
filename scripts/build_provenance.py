@@ -25,11 +25,19 @@ def source_digest(root):
 
 
 def commit(root):
-    result = subprocess.run(["git", "rev-parse", "--show-toplevel", "HEAD"], cwd=root, capture_output=True, text=True)
+    result = subprocess.run(["git", "rev-parse", "--show-toplevel", "HEAD"], cwd=root,
+                            capture_output=True, text=True)
     if result.returncode:
         return None  # Disposable Use-this-template validation fixtures may have no .git.
     lines = result.stdout.splitlines()
-    if len(lines) != 2 or Path(lines[0]).resolve() != Path(root).resolve():
+    if len(lines) != 2:
+        return None
+    # A component may be hosted inside a larger worktree (monorepo): the
+    # enclosing repository's HEAD is its release revision, matching the exact
+    # dispatch SHA the workflows bind evidence to. Only reject roots outside
+    # any repository (or outside the resolved toplevel).
+    toplevel = Path(lines[0]).resolve()
+    if not Path(root).resolve().is_relative_to(toplevel):
         return None
     return lines[1]
 

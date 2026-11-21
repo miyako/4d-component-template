@@ -47,9 +47,13 @@ def synthetic_pe():
 
 class DeliveryTests(unittest.TestCase):
     def setUp(self):
-        self.scratch = tempfile.TemporaryDirectory(prefix=".delivery-test-", dir=ROOT)
+        # Disposable fixtures keep their scratch outside any git worktree so
+        # build_provenance.commit() deterministically returns None, matching the
+        # tests that patch commit to None for no-.git fixtures. System temp may
+        # itself live under a symlink (macOS /var), so resolve it first.
+        self.scratch = tempfile.TemporaryDirectory(prefix=".delivery-test-")
         self.addCleanup(self.scratch.cleanup)
-        self.root = Path(self.scratch.name)
+        self.root = Path(self.scratch.name).resolve()
         self.config = {
             "schema": 1, "initialized": True, "repository": "example-component",
             "namespace": "Example", "cli": "example-cli", "language": "go",

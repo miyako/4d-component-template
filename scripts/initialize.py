@@ -18,7 +18,12 @@ def github_repository(root):
     root = Path(root).resolve()
     top = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=root,
                          capture_output=True, text=True, check=False)
-    if top.returncode or Path(top.stdout.strip()).resolve() != root:
+    if top.returncode:
+        return None
+    # Accept a component hosted inside a larger worktree (monorepo): the
+    # containing toplevel's origin is still the destination repository.
+    toplevel = Path(top.stdout.strip()).resolve()
+    if toplevel != root and not root.is_relative_to(toplevel):
         return None
     remote = subprocess.run(["git", "remote", "get-url", "origin"], cwd=root,
                             capture_output=True, text=True, check=False)
