@@ -106,6 +106,41 @@ or packaging; do not turn an SDK requirement into a component resource.
    ancestry before publication. Never clobber, precreate tags or enable tag-push
    publication. Build does not bump or commit source metadata.
 
+## Hosted CI failure signatures (triage before touching workflows)
+
+These GitHub Actions failure modes were observed live in a derived
+repository; none of them surface a normal error message:
+
+- **Digit-leading job identifiers invalidate the entire workflow file.**
+  A job id like `4d-acceptance` (must start with a letter or underscore)
+  makes every run fail at creation: the run is labeled by the file path
+  instead of the workflow `name:`, concludes `failure`, and shows **zero
+  jobs and zero check runs**. `workflow_contract.py` rejects such
+  identifiers proactively. If a run ever appears path-labeled with no
+  jobs, suspect the workflow text itself, not the code under test.
+- **Hosted runner labels retire.** Pin concrete labels (`macos-15`,
+  `ubuntu-24.04`) and keep them aligned with the audited gold-standard
+  repositories; never `macos-latest` in a pinned pipeline. A retired
+  label cancels the affected job within a second of start with the
+  annotation `The configuration '<label>-<arch>-us-default' is not
+  supported` — preflight succeeds first, which makes it look like an
+  acceptance failure. Bump the label; do not add workarounds.
+- **Cross-job evidence must be root-relative.** Acceptance evidence,
+  manifests and locks written by an earlier job must store root-relative
+  POSIX paths (`dist/<component>.zip`), never absolute ones: the
+  verifying job may run on a different runner OS and recomputes paths
+  (`/Users/runner` vs `/home/runner`). The release scripts enforce the
+  relative form; keep it in any extension.
+- **Expect cache directories to be absent on hosted runners.** Dirs like
+  `cli/assets/` are gitignored; any staged download must create the
+  destination's parent (`mkdir(parents=True, exist_ok=True)`) before
+  writing `.downloading` temp files.
+- **Artifacts flatten their common path prefix.** A step uploading a
+  single `4d/dist/webp.zip` entry yields a top-level `webp.zip` in the
+  archive; a later `actions/download-artifact` must set `path:` so the
+  verified layout (`4d/dist/`) is reconstructed, or the verifying script
+  will not find the files.
+
 ## Canonical generated workflow contract
 
 Before initialization or workflow tests, install the pinned development-only

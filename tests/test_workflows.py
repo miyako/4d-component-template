@@ -97,6 +97,24 @@ class WorkflowTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "duplicate"):
             workflow_contract.validate(self.root)
 
+    def test_digit_leading_job_identifier_is_rejected(self):
+        # A job id like "4d-acceptance" invalidates the whole workflow file on
+        # GitHub (run created, zero jobs, labeled by path). The contract must
+        # catch it before the job-graph comparison reports a misleading error.
+        original = (self.root / ".github/workflows/ci.yml").read_text()
+        for bad in ("4d-acceptance", "3rd-job", "-lowercase"):
+            with self.subTest(identifier=bad):
+                document = self.document("ci")
+                jobs = document["jobs"]
+                document["jobs"] = {bad if key == "assembly" else key: value
+                                    for key, value in jobs.items()}
+                (self.root / ".github/workflows/ci.yml").write_text(
+                    yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+                with self.assertRaisesRegex(ValueError, "letter or underscore"):
+                    workflow_contract.validate(self.root)
+                (self.root / ".github/workflows/ci.yml").write_text(original)
+        self.assertEqual(workflow_contract.validate(self.root)["status"], "passed")
+
     def test_negative_dispatch_and_graph_mutations(self):
         cases = [
             ("ci", lambda d: d["on"].update(push={"tags": ["*"]})),

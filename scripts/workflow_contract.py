@@ -191,6 +191,15 @@ def validate(root=ROOT):
     for name, document in documents.items():
         require(document.get("permissions") == {"contents": "read"}, "default contents permission must be read")
         jobs = document["jobs"]
+        # GitHub rejects entire workflow files whose job identifiers start with
+        # a digit: the run is created, fails, and carries zero jobs/check runs
+        # while being labeled by the file path instead of the workflow name.
+        # Observed live with a job id "4d-acceptance" (miyako/webp run
+        # 44876802506); the renamed identical file parsed and ran (44876936674).
+        for job_name in jobs:
+            require(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_-]*", job_name),
+                    "job identifiers must start with a letter or underscore "
+                    "(the workflow file is invalid otherwise): " + name + ":" + job_name)
         require(set(jobs) == set(expected_jobs[name]), "unsupported job graph: " + name)
         for job_name, job in jobs.items():
             require(job.get("needs") == expected_jobs[name][job_name], "missing mandatory job dependency")
