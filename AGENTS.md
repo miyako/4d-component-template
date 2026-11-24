@@ -333,6 +333,22 @@ generic build/host runner merely to accommodate random output.
   4D Boolean expressions do not safely short-circuit type-sensitive operations:
   validate `Value type(payload.protocol)` in a separate `If` before comparing
   its numeric protocol version. Do not combine the guard and comparison with OR.
+* Never locate the bundled executable through `Application file`: it is empty
+  under `tool4d`, so `Folder(Application file; fk platform path)` raises
+  `tool4d.FiFo [3] A valid posix path was expected.` before the fixture can log
+  anything, and the run exits with no output. `_CLI` resolves `/RESOURCES/bin`
+  (a virtual path) or takes the path from the request; a helper that discovers
+  its own bundle this way breaks only headlessly, never on a desktop.
+* `QUIT 4D` is queued for the end of the current method, not an abort. A guard
+  that reports a failure and quits still executes the code it was guarding, so
+  the first error arrives buried in a cascade of later ones. End the method, or
+  let the failure branch fall out of the last `Else`, and keep `QUIT 4D` at the
+  bottom of `Smoke`.
+* A run that exits non-zero with empty stdout and **no** status file died before
+  the fixture's first statement, which is the `--project` / `--user-param`
+  argument layer rather than component code. Check the path form for its
+  consumer first (`4dcli`, "Path Arguments": native separators for `--project`,
+  POSIX for `File()`), then `Project/Sources/dependencies.json`.
 * Native Windows target is explicitly `Windows-x64`; never infer CPU
   architecture from freeform processor names. Native Windows ARM64 is unsupported.
 * This starter is synchronous, with a finite 30-second timeout. Async work needs
